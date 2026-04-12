@@ -1,0 +1,31 @@
+# ARGUS-X Backend Dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.2
+python-dotenv==1.0.0
+
+# Supabase
+supabase==2.3.4
+postgrest==0.13.0
+
+# LLM
+litellm==1.16.19
+
+# ML / ONNX
+onnxruntime==1.16.3
+transformers==4.36.2
+tokenizers==0.15.0
+numpy==1.26.2
+
+# NLP / Security
+sentence-transformers==2.2.2
+scikit-learn==1.3.2
+
+# Monitoring
+sentry-sdk[fastapi]==1.39.1
+
+# Utilities
+httpx==0.25.2
+aiofiles==23.2.1
+python-multipart==0.0.6
+huggingface-hub==0.20.1

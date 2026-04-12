@@ -1,0 +1,282 @@
+-- ═══════════════════════════════════════════════════════════════════════
+-- ARGUS-X — Complete Supabase Schema v3.0
+-- Paste in: Supabase Dashboard → SQL Editor → Run All
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── EVENTS TABLE ──────────────────────────────────────────────────────────
+-- Every single request through ARGUS creates one row here.
+-- Supabase Realtime broadcasts each INSERT to all dashboard clients.
+CREATE TABLE IF NOT EXISTS events (
+  id                   UUID             DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at           TIMESTAMPTZ      DEFAULT NOW() NOT NULL,
+  user_id              TEXT             DEFAULT 'anonymous',
+  session_id           TEXT,
+  preview              TEXT,
+  action               TEXT             NOT NULL CHECK (action IN ('BLOCKED','SANITIZED','CLEAN')),
+  threat_type          TEXT,
+  score                DOUBLE PRECISION DEFAULT 0,
+  layer                TEXT             CHECK (layer IN ('INPUT','OUTPUT','NONE')),
+  latency_ms           DOUBLE PRECISION DEFAULT 0,
+  method               TEXT             DEFAULT '',
+  sophistication_score INTEGER          DEFAULT 0,
+  attack_fingerprint   TEXT,
+  mutations_preblocked INTEGER          DEFAULT 0,
+  session_threat_level TEXT             DEFAULT 'LOW' CHECK (session_threat_level IN ('LOW','MEDIUM','HIGH','CRITICAL')),
+  explanation          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_created_at    ON events (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_action        ON events (action);
+CREATE INDEX IF NOT EXISTS idx_events_threat_type   ON events (threat_type) WHERE threat_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_fingerprint   ON events (attack_fingerprint) WHERE attack_fingerprint IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_session       ON events (session_id);
+CREATE INDEX IF NOT EXISTS idx_events_sophistication ON events (sophistication_score DESC);
+
+-- ── STATS TABLE ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS stats (
+  id                   INTEGER          PRIMARY KEY DEFAULT 1,
+  total                INTEGER          DEFAULT 0,
+  blocked              INTEGER          DEFAULT 0,
+  sanitized            INTEGER          DEFAULT 0,
+  clean                INTEGER          DEFAULT 0,
+  bypasses_found       INTEGER          DEFAULT 0,
+  mutations_preblocked INTEGER          DEFAULT 0,
+  campaigns_detected   INTEGER          DEFAULT 0,
+  updated_at           TIMESTAMPTZ      DEFAULT NOW()
+);
+INSERT INTO stats (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION increment_stat(col_name TEXT)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  EXECUTE format(
+    'UPDATE stats SET %I = %I + 1, total = CASE WHEN %L = ANY(ARRAY[''blocked'',''sanitized'',''clean'']) THEN total + 1 ELSE total END, updated_at = NOW() WHERE id = 1',
+    col_name, col_name, col_name
+  );
+END;
+$$;
+
+-- ── XAI DECISIONS TABLE (NEW in v3) ──────────────────────────────────────
+-- Stores explainable AI reasoning for every blocked/sanitized event.
+CREATE TABLE IF NOT EXISTS xai_decisions (
+  id                   UUID             DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at           TIMESTAMPTZ      DEFAULT NOW() NOT NULL,
+  event_id             UUID,
+  attack_preview       TEXT,
+  verdict              TEXT             CHECK (verdict IN ('BLOCKED','SANITIZED','FLAGGED')),
+  sophistication_score INTEGER          DEFAULT 0,
+  primary_reason       TEXT,
+  pattern_family       TEXT,
+  evolution_note       TEXT,
+  recommended_action   TEXT,
+  layer_decisions      JSONB            DEFAULT '[]'::jsonb,
+  confidence_breakdown JSONB            DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_xai_created ON xai_decisions (created_at DESC);
+
+-- ── BATTLE STATE TABLE (NEW in v3) ───────────────────────────────────────
+-- Single-row table updated every battle tick. Supabase Realtime broadcasts.
+CREATE TABLE IF NOT EXISTS battle_state (
+  id                   INTEGER          PRIMARY KEY DEFAULT 1,
+  tick                 INTEGER          DEFAULT 0,
+  red_attacks          INTEGER          DEFAULT 0,
+  red_bypasses         INTEGER          DEFAULT 0,
+  blue_blocks          INTEGER          DEFAULT 0,
+  blue_auto_patches    INTEGER          DEFAULT 0,
+  red_tier             INTEGER          DEFAULT 1,
+  red_strategy         TEXT             DEFAULT 'NAIVE',
+  battle_score_red     INTEGER          DEFAULT 0,
+  battle_score_blue    INTEGER          DEFAULT 0,
+  mutations_total      INTEGER          DEFAULT 0,
+  status               TEXT             DEFAULT 'READY',
+  last_update          TIMESTAMPTZ      DEFAULT NOW()
+);
+INSERT INTO battle_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- ── EVOLUTION LOG TABLE (NEW in v3) ──────────────────────────────────────
+-- Tracks sophistication trend history for the evolution chart.
+CREATE TABLE IF NOT EXISTS evolution_log (
+  id                   UUID             DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at           TIMESTAMPTZ      DEFAULT NOW() NOT NULL,
+  window_avg           DOUBLE PRECISION DEFAULT 0,
+  trend                TEXT             DEFAULT 'STABLE',
+  data_points          INTEGER          DEFAULT 0,
+  escalation_count     INTEGER          DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_evolution_created ON evolution_log (created_at DESC);
+
+-- ── THREAT CLUSTERS TABLE (NEW in v3) ────────────────────────────────────
+-- Stores DBSCAN clustering results for the cluster map.
+CREATE TABLE IF NOT EXISTS threat_clusters (
+  id                   UUID             DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at           TIMESTAMPTZ      DEFAULT NOW() NOT NULL,
+  cluster_id           TEXT,
+  cluster_size         INTEGER          DEFAULT 0,
+  dominant_type        TEXT,
+  avg_sophistication   DOUBLE PRECISION DEFAULT 0,
+  sample_text          TEXT,
+  types                JSONB            DEFAULT '[]'::jsonb
+);
+
+-- ── RED TEAM SESSIONS TABLE ───────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS red_team_sessions (
+  id            UUID             DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at    TIMESTAMPTZ      DEFAULT NOW(),
+  attack_text   TEXT,
+  attack_type   TEXT,
+  tier          INTEGER          DEFAULT 1,
+  bypassed      BOOLEAN          DEFAULT false,
+  auto_patched  BOOLEAN          DEFAULT false,
+  cycle         INTEGER          DEFAULT 0,
+  score         DOUBLE PRECISION DEFAULT 0,
+  latency_ms    DOUBLE PRECISION DEFAULT 0
+);
+
+-- ── ATTACK FINGERPRINTS TABLE ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS attack_fingerprints (
+  id                UUID         DEFAULT gen_random_uuid() PRIMARY KEY,
+  fingerprint_id    TEXT         UNIQUE NOT NULL,
+  threat_type       TEXT,
+  sophistication    INTEGER      DEFAULT 1,
+  first_seen        TIMESTAMPTZ  DEFAULT NOW(),
+  last_seen         TIMESTAMPTZ  DEFAULT NOW(),
+  occurrence_count  INTEGER      DEFAULT 1,
+  explanation       TEXT,
+  auto_blocked      BOOLEAN      DEFAULT false
+);
+
+CREATE OR REPLACE FUNCTION upsert_fingerprint(
+  p_fingerprint_id TEXT, p_threat_type TEXT, p_sophistication INTEGER, p_explanation TEXT
+) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO attack_fingerprints (fingerprint_id, threat_type, sophistication, explanation)
+  VALUES (p_fingerprint_id, p_threat_type, p_sophistication, p_explanation)
+  ON CONFLICT (fingerprint_id)
+  DO UPDATE SET occurrence_count = attack_fingerprints.occurrence_count + 1,
+                last_seen = NOW();
+END;
+$$;
+
+-- ── CAMPAIGNS TABLE ───────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS campaigns (
+  id               UUID         DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id      TEXT         UNIQUE,
+  type             TEXT,
+  threat_type      TEXT,
+  severity         TEXT         CHECK (severity IN ('LOW','MEDIUM','HIGH','CRITICAL')),
+  events_count     INTEGER      DEFAULT 0,
+  unique_users     INTEGER      DEFAULT 0,
+  unique_sessions  INTEGER      DEFAULT 0,
+  window_minutes   INTEGER,
+  detected_at      TIMESTAMPTZ  DEFAULT NOW(),
+  resolved_at      TIMESTAMPTZ,
+  status           TEXT         DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RESOLVED','FALSE_POSITIVE'))
+);
+
+-- ── DYNAMIC RULES TABLE ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS dynamic_rules (
+  id            UUID         DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at    TIMESTAMPTZ  DEFAULT NOW(),
+  pattern       TEXT         NOT NULL,
+  threat_type   TEXT,
+  source        TEXT         CHECK (source IN ('MUTATION_ENGINE','RED_TEAM_AGENT','MANUAL')),
+  active        BOOLEAN      DEFAULT true,
+  trigger_count INTEGER      DEFAULT 0
+);
+
+-- ── KNOWLEDGE BASE TABLE ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS knowledge_base (
+  id              UUID         DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at      TIMESTAMPTZ  DEFAULT NOW(),
+  threat_type     TEXT,
+  fingerprint_id  TEXT,
+  sophistication  INTEGER,
+  pattern_vector  TEXT,
+  origin          TEXT         DEFAULT 'local',
+  verified        BOOLEAN      DEFAULT false
+);
+
+-- ── ROW LEVEL SECURITY ────────────────────────────────────────────────────
+ALTER TABLE events              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stats               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE xai_decisions       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE battle_state        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evolution_log       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE threat_clusters     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE red_team_sessions   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attack_fingerprints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dynamic_rules       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_base      ENABLE ROW LEVEL SECURITY;
+
+-- Public read (dashboard uses anon key)
+CREATE POLICY "Public read events"       ON events              FOR SELECT USING (true);
+CREATE POLICY "Public read stats"        ON stats               FOR SELECT USING (true);
+CREATE POLICY "Public read xai"          ON xai_decisions       FOR SELECT USING (true);
+CREATE POLICY "Public read battle"       ON battle_state        FOR SELECT USING (true);
+CREATE POLICY "Public read evolution"    ON evolution_log       FOR SELECT USING (true);
+CREATE POLICY "Public read clusters"     ON threat_clusters     FOR SELECT USING (true);
+CREATE POLICY "Public read red_team"     ON red_team_sessions   FOR SELECT USING (true);
+CREATE POLICY "Public read fingerprints" ON attack_fingerprints FOR SELECT USING (true);
+CREATE POLICY "Public read campaigns"    ON campaigns           FOR SELECT USING (true);
+CREATE POLICY "Public read rules"        ON dynamic_rules       FOR SELECT USING (true);
+CREATE POLICY "Public read knowledge"    ON knowledge_base      FOR SELECT USING (true);
+
+-- Service role writes (backend uses service_role key)
+CREATE POLICY "Service write events"       ON events              FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service write stats"        ON stats               FOR UPDATE USING (true);
+CREATE POLICY "Service write xai"          ON xai_decisions       FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service write battle"       ON battle_state        FOR ALL USING (true);
+CREATE POLICY "Service write evolution"    ON evolution_log       FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service write clusters"     ON threat_clusters     FOR ALL USING (true);
+CREATE POLICY "Service write red_team"     ON red_team_sessions   FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service write fingerprints" ON attack_fingerprints FOR ALL USING (true);
+CREATE POLICY "Service write campaigns"    ON campaigns           FOR ALL USING (true);
+CREATE POLICY "Service write rules"        ON dynamic_rules       FOR ALL USING (true);
+CREATE POLICY "Service write knowledge"    ON knowledge_base      FOR ALL USING (true);
+
+-- ── ENABLE REALTIME ───────────────────────────────────────────────────────
+ALTER TABLE events              REPLICA IDENTITY FULL;
+ALTER TABLE battle_state        REPLICA IDENTITY FULL;
+ALTER TABLE campaigns           REPLICA IDENTITY FULL;
+ALTER TABLE xai_decisions       REPLICA IDENTITY FULL;
+ALTER TABLE red_team_sessions   REPLICA IDENTITY FULL;
+ALTER TABLE attack_fingerprints REPLICA IDENTITY FULL;
+
+-- ── ANALYTICS VIEWS ───────────────────────────────────────────────────────
+CREATE OR REPLACE VIEW threat_summary AS
+SELECT
+  DATE_TRUNC('hour', created_at) AS hour,
+  action,
+  threat_type,
+  COUNT(*)                        AS count,
+  AVG(score)                      AS avg_score,
+  AVG(sophistication_score)       AS avg_sophistication,
+  AVG(latency_ms)                 AS avg_latency
+FROM events
+WHERE created_at > NOW() - INTERVAL '24 hours'
+GROUP BY 1, 2, 3
+ORDER BY 1 DESC;
+
+CREATE OR REPLACE VIEW attack_heatmap AS
+SELECT
+  EXTRACT(HOUR FROM created_at)   AS hour_of_day,
+  EXTRACT(DOW  FROM created_at)   AS day_of_week,
+  COUNT(*)                         AS threat_count
+FROM events
+WHERE action = 'BLOCKED'
+  AND created_at > NOW() - INTERVAL '7 days'
+GROUP BY 1, 2;
+
+-- ── VERIFICATION ──────────────────────────────────────────────────────────
+DO $$
+BEGIN
+  RAISE NOTICE '✅ ARGUS-X Schema v3.0 created successfully';
+  RAISE NOTICE 'Tables: events, stats, xai_decisions, battle_state, evolution_log, threat_clusters, red_team_sessions, attack_fingerprints, campaigns, dynamic_rules, knowledge_base';
+  RAISE NOTICE 'Next steps:';
+  RAISE NOTICE '  1. Enable Realtime on: events, battle_state, campaigns, xai_decisions';
+  RAISE NOTICE '  2. Create Storage bucket "argus-models" (Private)';
+  RAISE NOTICE '  3. Upload ONNX model files to the bucket';
+END $$;
