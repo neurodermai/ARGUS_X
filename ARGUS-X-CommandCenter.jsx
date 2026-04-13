@@ -433,10 +433,11 @@ function Sparkline({ data, color = "#00e5ff", height = 36 }) {
     const y = height - ((v - min) / (max - min + 1)) * (height - 4) - 2;
     return `${x},${y}`;
   }).join(" ");
+  const lastPt = pts.split(" ").pop().split(",");
   return (
     <svg width={w} height={height} style={{ display: "block" }}>
       <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-      <circle cx={pts.split(" ").pop().split(",")[0]} cy={pts.split(" ").pop().split(",")[1]} r="2.5" fill={color} />
+      <circle cx={lastPt[0]} cy={lastPt[1]} r="2.5" fill={color} />
     </svg>
   );
 }
