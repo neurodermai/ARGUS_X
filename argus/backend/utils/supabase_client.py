@@ -33,13 +33,25 @@ class SupabaseClient:
         self.available = False
         
         url = os.getenv("SUPABASE_URL", "")
-        key = os.getenv("SUPABASE_KEY", "")
+
+        # ── Key resolution (service role key — full admin access) ─────────
+        # SECURITY: This key bypasses RLS. It must NEVER be exposed to
+        # frontend code, browser clients, logs, or error messages.
+        # Prefer SUPABASE_SERVICE_KEY; fall back to legacy SUPABASE_KEY.
+        key = os.getenv("SUPABASE_SERVICE_KEY", "")
+        if not key:
+            key = os.getenv("SUPABASE_KEY", "")
+            if key:
+                log.warning(
+                    "⚠️ SUPABASE_KEY is deprecated — rename to SUPABASE_SERVICE_KEY "
+                    "to make the privilege level explicit and prevent accidental exposure"
+                )
         
         if SUPABASE_AVAILABLE and url and key:
             try:
                 self.client = create_client(url, key)
                 self.available = True
-                log.info("✅ Supabase connected")
+                log.info("✅ Supabase connected (service role)")
             except Exception as e:
                 log.warning(f"⚠️ Supabase connection failed: {e} — running in memory-only mode")
         else:

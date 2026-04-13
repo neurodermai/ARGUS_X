@@ -336,7 +336,7 @@ The project includes a `Dockerfile` and `railway.json` for one-click Railway dep
 
 1. Fork this repo
 2. Connect to Railway
-3. Add environment variables: `SUPABASE_URL`, `SUPABASE_KEY`, `LLM_MODEL`
+3. Add environment variables: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `LLM_MODEL`
 4. Deploy — Railway auto-detects the Dockerfile
 
 ### Environment Variables
@@ -344,7 +344,8 @@ The project includes a `Dockerfile` and `railway.json` for one-click Railway dep
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SUPABASE_URL` | ✅ | Your Supabase project URL |
-| `SUPABASE_KEY` | ✅ | Supabase service role key |
+| `SUPABASE_SERVICE_KEY` | ✅ | Supabase **service role** key (backend only — bypasses RLS) |
+| `SUPABASE_ANON_KEY` | ❌ | Supabase **anon** key (frontend-safe — respects RLS) |
 | `ANTHROPIC_API_KEY` | ❌ | Claude API key (for real LLM) |
 | `OPENAI_API_KEY` | ❌ | OpenAI API key (alternative) |
 | `LLM_MODEL` | ❌ | Model name (default: mock mode) |
