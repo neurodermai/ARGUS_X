@@ -1,0 +1,11 @@
+# ARGUS-X Backend
+__pycache__/
+*.pyc
+*.pyo
+.env
+models/
+*.onnx
+.DS_Store
+venv/
+.venv/
+node_modules/

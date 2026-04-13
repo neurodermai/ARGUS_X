@@ -1,0 +1,342 @@
+"""
+ARGUS-X — Supabase Client
+All database operations. Uses service_role key for writes, anon key for reads.
+CRITICAL: supabase-py is synchronous, so all writes use run_in_executor.
+"""
+import os
+import asyncio
+import json
+import logging
+from datetime import datetime
+from typing import Optional, Dict, List, Any
+from functools import partial
+
+log = logging.getLogger("argus.supabase")
+
+# Try to import supabase, graceful fallback if unavailable
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+    log.warning("⚠️ supabase-py not installed — running in memory-only mode")
+
+
+class SupabaseClient:
+    """
+    Wrapper around Supabase with async support via run_in_executor.
+    Gracefully degrades if Supabase is unavailable (logs warning, continues).
+    """
+
+    def __init__(self):
+        self.client: Optional[Any] = None
+        self.available = False
+        
+        url = os.getenv("SUPABASE_URL", "")
+        key = os.getenv("SUPABASE_KEY", "")
+        
+        if SUPABASE_AVAILABLE and url and key:
+            try:
+                self.client = create_client(url, key)
+                self.available = True
+                log.info("✅ Supabase connected")
+            except Exception as e:
+                log.warning(f"⚠️ Supabase connection failed: {e} — running in memory-only mode")
+        else:
+            log.warning("⚠️ Supabase credentials not set — running in memory-only mode")
+        
+        # In-memory fallback storage
+        self._memory_events: List[dict] = []
+        self._memory_stats = {
+            "total": 0, "blocked": 0, "sanitized": 0, "clean": 0,
+            "bypasses_found": 0, "mutations_preblocked": 0, "campaigns_detected": 0
+        }
+
+    async def _run_sync(self, func, *args, **kwargs):
+        """Run synchronous supabase-py calls in executor to avoid blocking."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+
+    # ── Events ────────────────────────────────────────────────────────────────
+
+    async def log_event(self, event: dict):
+        """Insert event into events table. Triggers Realtime broadcast."""
+        try:
+            if self.available:
+                row = {
+                    "user_id":              event.get("user_id", "anonymous"),
+                    "session_id":           event.get("session_id"),
+                    "preview":              event.get("preview", ""),
+                    "action":               event.get("action", "CLEAN"),
+                    "threat_type":          event.get("threat_type"),
+                    "score":                event.get("score", 0),
+                    "layer":                event.get("layer", "NONE"),
+                    "latency_ms":           event.get("latency_ms", 0),
+                    "method":               event.get("method", ""),
+                    "sophistication_score": event.get("sophistication", 0),
+                    "attack_fingerprint":   event.get("fingerprint"),
+                    "mutations_preblocked": event.get("mutations_preblocked", 0),
+                    "session_threat_level": event.get("session_threat_level", "LOW"),
+                    "explanation":          event.get("explanation"),
+                }
+                await self._run_sync(
+                    lambda: self.client.table("events").insert(row).execute()
+                )
+            else:
+                self._memory_events.append(event)
+                if len(self._memory_events) > 1000:
+                    self._memory_events = self._memory_events[-500:]
+        except Exception as e:
+            log.warning(f"Event log failed: {e}")
+            self._memory_events.append(event)
+
+    async def get_recent_events(self, limit: int = 30) -> list:
+        """Fetch recent events for dashboard hydration."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("events")
+                        .select("*")
+                        .order("created_at", desc=True)
+                        .limit(limit)
+                        .execute()
+                )
+                return result.data if result.data else []
+            else:
+                return self._memory_events[-limit:]
+        except Exception as e:
+            log.warning(f"Get events failed: {e}")
+            return self._memory_events[-limit:]
+
+    # ── Stats ─────────────────────────────────────────────────────────────────
+
+    async def increment_stat(self, column: str):
+        """Atomically increment a stat column using the DB function."""
+        try:
+            if self.available:
+                await self._run_sync(
+                    lambda: self.client.rpc("increment_stat", {"col_name": column}).execute()
+                )
+            else:
+                if column in self._memory_stats:
+                    self._memory_stats[column] += 1
+                if column in ("blocked", "sanitized", "clean"):
+                    self._memory_stats["total"] += 1
+        except Exception as e:
+            log.warning(f"Stat increment failed: {e}")
+            if column in self._memory_stats:
+                self._memory_stats[column] += 1
+
+    async def get_stats(self) -> dict:
+        """Get current stats."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("stats").select("*").eq("id", 1).execute()
+                )
+                if result.data:
+                    return result.data[0]
+            return self._memory_stats
+        except Exception as e:
+            log.warning(f"Get stats failed: {e}")
+            return self._memory_stats
+
+    # ── Red Team Sessions ─────────────────────────────────────────────────────
+
+    async def log_red_team_result(self, result: dict):
+        """Log a red team attack result."""
+        try:
+            if self.available:
+                row = {
+                    "attack_text":  result.get("attack", "")[:500],
+                    "attack_type":  result.get("attack_type"),
+                    "tier":         result.get("tier", 1),
+                    "bypassed":     result.get("bypassed", False),
+                    "auto_patched": result.get("auto_patched", False),
+                    "cycle":        result.get("cycle", 0),
+                    "score":        result.get("score", 0),
+                    "latency_ms":   result.get("latency_ms", 0),
+                }
+                await self._run_sync(
+                    lambda: self.client.table("red_team_sessions").insert(row).execute()
+                )
+        except Exception as e:
+            log.warning(f"Red team log failed: {e}")
+
+    # ── Campaigns ─────────────────────────────────────────────────────────────
+
+    async def log_campaign(self, campaign: dict):
+        """Log a detected campaign."""
+        try:
+            if self.available:
+                row = {
+                    "campaign_id":     campaign.get("id"),
+                    "type":            campaign.get("type"),
+                    "threat_type":     campaign.get("threat_type"),
+                    "severity":        campaign.get("severity"),
+                    "events_count":    campaign.get("events_count", 0),
+                    "unique_users":    campaign.get("unique_users", 0),
+                    "unique_sessions": campaign.get("unique_sessions", 0),
+                    "window_minutes":  campaign.get("window_minutes"),
+                    "status":          campaign.get("status", "ACTIVE"),
+                }
+                await self._run_sync(
+                    lambda: self.client.table("campaigns").insert(row).execute()
+                )
+                await self.increment_stat("campaigns_detected")
+        except Exception as e:
+            log.warning(f"Campaign log failed: {e}")
+
+    # ── XAI Decisions ─────────────────────────────────────────────────────────
+
+    async def log_xai_decision(self, decision: dict):
+        """Log an XAI decision for the explainability stream."""
+        try:
+            if self.available:
+                # Serialize complex fields for Supabase
+                row = {
+                    "attack_preview": decision.get("attack_preview", ""),
+                    "verdict": decision.get("verdict", "UNKNOWN"),
+                    "sophistication_score": decision.get("sophistication_score", 0),
+                    "primary_reason": decision.get("primary_reason", ""),
+                    "pattern_family": decision.get("pattern_family", ""),
+                    "evolution_note": decision.get("evolution_note", ""),
+                    "recommended_action": decision.get("recommended_action", ""),
+                    "layer_decisions": json.dumps(decision.get("layer_decisions", [])),
+                    "confidence_breakdown": json.dumps(decision.get("confidence_breakdown", {})),
+                }
+                await self._run_sync(
+                    lambda: self.client.table("xai_decisions").insert(row).execute()
+                )
+        except Exception as e:
+            log.warning(f"XAI decision log failed: {e}")
+
+    # ── Battle State ──────────────────────────────────────────────────────────
+
+    async def update_battle_state(self, state: dict):
+        """Upsert battle state (single row, id=1). Triggers Realtime."""
+        try:
+            if self.available:
+                # Only include columns that exist in the battle_state table
+                row = {
+                    "id": 1,
+                    "tick": state.get("tick", 0),
+                    "red_attacks": state.get("red_attacks", 0),
+                    "red_bypasses": state.get("red_bypasses", 0),
+                    "blue_blocks": state.get("blue_blocks", 0),
+                    "blue_auto_patches": state.get("blue_auto_patches", 0),
+                    "red_tier": state.get("red_tier", 1),
+                    "red_strategy": state.get("red_strategy", "NAIVE"),
+                    "mutations_total": state.get("mutations_total", 0),
+                    "status": state.get("status", "READY"),
+                    "last_update": state.get("last_update"),
+                }
+                await self._run_sync(
+                    lambda: self.client.table("battle_state").upsert(row).execute()
+                )
+        except Exception as e:
+            log.warning(f"Battle state update failed: {e}")
+
+    async def get_battle_state(self) -> dict:
+        """Get current battle state."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("battle_state").select("*").eq("id", 1).execute()
+                )
+                if result.data:
+                    return result.data[0]
+        except Exception as e:
+            log.warning(f"Get battle state failed: {e}")
+        return {}
+
+    # ── Dynamic Rules ─────────────────────────────────────────────────────────
+
+    async def add_dynamic_rule(self, pattern: str, threat_type: str, source: str = "MUTATION_ENGINE"):
+        """Add a dynamic firewall rule."""
+        try:
+            if self.available:
+                await self._run_sync(
+                    lambda: self.client.table("dynamic_rules").insert({
+                        "pattern": pattern[:500],
+                        "threat_type": threat_type,
+                        "source": source,
+                        "active": True,
+                    }).execute()
+                )
+        except Exception as e:
+            log.warning(f"Dynamic rule add failed: {e}")
+
+    async def get_dynamic_rules(self) -> list:
+        """Get all active dynamic rules."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("dynamic_rules")
+                        .select("*")
+                        .eq("active", True)
+                        .execute()
+                )
+                return result.data if result.data else []
+        except Exception as e:
+            log.warning(f"Get dynamic rules failed: {e}")
+        return []
+
+    # ── Fingerprints ──────────────────────────────────────────────────────────
+
+    async def upsert_fingerprint(self, fp_id: str, threat_type: str, sophistication: int, explanation: str):
+        """Upsert an attack fingerprint."""
+        try:
+            if self.available:
+                await self._run_sync(
+                    lambda: self.client.rpc("upsert_fingerprint", {
+                        "p_fingerprint_id": fp_id,
+                        "p_threat_type": threat_type,
+                        "p_sophistication": sophistication,
+                        "p_explanation": explanation,
+                    }).execute()
+                )
+        except Exception as e:
+            log.warning(f"Fingerprint upsert failed: {e}")
+
+    # ── Analytics Queries ─────────────────────────────────────────────────────
+
+    async def get_threat_summary(self) -> list:
+        """Get hourly threat summary from the view."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("threat_summary").select("*").execute()
+                )
+                return result.data if result.data else []
+        except Exception as e:
+            log.warning(f"Threat summary failed: {e}")
+        return []
+
+    async def get_attack_heatmap(self) -> list:
+        """Get attack heatmap data from the view."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("attack_heatmap").select("*").execute()
+                )
+                return result.data if result.data else []
+        except Exception as e:
+            log.warning(f"Heatmap failed: {e}")
+        return []
+
+    async def get_recent_xai_decisions(self, limit: int = 20) -> list:
+        """Get recent XAI decisions for the stream."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self.client.table("xai_decisions")
+                        .select("*")
+                        .order("created_at", desc=True)
+                        .limit(limit)
+                        .execute()
+                )
+                return result.data if result.data else []
+        except Exception as e:
+            log.warning(f"XAI decisions fetch failed: {e}")
+        return []
