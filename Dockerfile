@@ -4,17 +4,23 @@
 # DO NOT add nixpacks.toml, Procfile, or a second railway.json.
 # Those files were removed to eliminate non-deterministic build conflicts.
 # ═══════════════════════════════════════════════════════════════════════════════
-FROM python:3.11-slim
 
-WORKDIR /app
+# ── Stage 1: Builder (install deps with build tools) ─────────────────────────
+FROM python:3.11-slim AS builder
 
-# Install minimal system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc && rm -rf /var/lib/apt/lists/*
 
-# Copy and install slim requirements (no torch/sentence-transformers = ~1.5GB image)
 COPY requirements-deploy.txt .
-RUN pip install --no-cache-dir -r requirements-deploy.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements-deploy.txt
+
+# ── Stage 2: Runner (lean runtime image) ─────────────────────────────────────
+FROM python:3.11-slim AS runner
+
+WORKDIR /app
+
+# Copy only installed packages from builder (no gcc, no pip cache)
+COPY --from=builder /install /usr/local
 
 # Copy project
 COPY . .
