@@ -24,7 +24,7 @@ from typing import List
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +35,7 @@ from utils.logger import setup_logger
 from utils.supabase_client import SupabaseClient
 from utils.model_loader import ModelLoader
 from utils.session_store import SessionStore
+from utils.auth import require_api_key
 from ml.firewall import InputFirewall
 from ml.auditor import OutputAuditor
 from ml.llm_core import LLMCore
@@ -152,17 +153,20 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
 )
 
 # ─── Include Routers ──────────────────────────────────────────────────────────
-app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
-app.include_router(redteam.router, prefix="/api/v1", tags=["redteam"])
-app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
-app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
-app.include_router(knowledge.router, prefix="/api/v1", tags=["knowledge"])
-app.include_router(battle.router, prefix="/api/v1", tags=["battle"])
-app.include_router(xai.router, prefix="/api/v1", tags=["xai"])
+# All /api/v1 routes require X-API-Key header (when API_KEY env var is set).
+# Health, WebSocket, and static routes remain public.
+_auth = [Depends(require_api_key)]
+app.include_router(chat.router, prefix="/api/v1", tags=["chat"], dependencies=_auth)
+app.include_router(redteam.router, prefix="/api/v1", tags=["redteam"], dependencies=_auth)
+app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"], dependencies=_auth)
+app.include_router(agents.router, prefix="/api/v1", tags=["agents"], dependencies=_auth)
+app.include_router(knowledge.router, prefix="/api/v1", tags=["knowledge"], dependencies=_auth)
+app.include_router(battle.router, prefix="/api/v1", tags=["battle"], dependencies=_auth)
+app.include_router(xai.router, prefix="/api/v1", tags=["xai"], dependencies=_auth)
 
 
 # ─── WebSocket Live Feed ───────────────────────────────────────────────────────

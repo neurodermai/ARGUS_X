@@ -553,6 +553,15 @@ const API = `http://${_host}:8000/api/v1`;
 const THREAT_COLORS = {INSTRUCTION_OVERRIDE:'var(--red)',DATA_EXFILTRATION:'var(--red)',SYSTEM_PROMPT_EXTRACTION:'var(--amber)',CODE_INJECTION:'var(--orange)',ROLE_OVERRIDE:'var(--orange)',OBFUSCATED_INJECTION:'var(--purple)',CONTEXT_OVERFLOW:'var(--blue)',MULTI_TURN_ATTACK:'var(--amber)',ADVERSARIAL_ENCODING:'var(--purple)',JAILBREAK:'var(--red)',INDIRECT_INJECTION:'var(--orange)'};
 const S = {blocked:0,sanitized:0,clean:0,total:0,mutations:0,feedN:0,threats:{},latencies:[]};
 
+// ── Authenticated fetch wrapper ───────────────────────────────────────
+// Set API key: localStorage.setItem('ARGUS_API_KEY', 'your-key-here')
+function apiFetch(url, opts = {}) {
+  const key = localStorage.getItem('ARGUS_API_KEY') || '';
+  const headers = { ...(opts.headers || {}) };
+  if (key) headers['X-API-Key'] = key;
+  return fetch(url, { ...opts, headers });
+}
+
 // Tabs
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
@@ -789,7 +798,7 @@ function onEvent(d) {
 // ═════════════════════════════════════════════════════════════════════
 async function pollXAI() {
   try {
-    const r = await fetch(`${API}/xai/decisions?limit=12`);
+    const r = await apiFetch(`${API}/xai/decisions?limit=12`);
     const d = await r.json();
     const feed = document.getElementById('xai-feed');
     if(!d.decisions || !d.decisions.length) return;
@@ -827,7 +836,7 @@ async function pollXAI() {
 // ═════════════════════════════════════════════════════════════════════
 async function pollStats() {
   try {
-    const r = await fetch(`${API}/analytics/stats`);
+    const r = await apiFetch(`${API}/analytics/stats`);
     const d = await r.json();
     // Header counters
     animateCounter('h-blocked', d.blocked||0, 'var(--red)');
@@ -936,7 +945,7 @@ async function sendMsg(){
   addMsg('user',esc(txt));
   const thinking=addMsg('bot','<span class="spin"></span>');
   try{
-    const r=await fetch(`${API}/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,sentinel_off:bypass})});
+    const r=await apiFetch(`${API}/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,sentinel_off:bypass})});
     const d=await r.json();
     thinking.remove();
     let cls='bot',badges=[];
@@ -969,7 +978,7 @@ async function launchAtk(){
   box.classList.remove('show');v.textContent='⏳ Attack in flight…';box.classList.add('show');
   sophRow.style.display='none';expEl.style.display='none';
   try{
-    const r=await fetch(`${API}/redteam`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:atk,attack_type:'MANUAL'})});
+    const r=await apiFetch(`${API}/redteam`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:atk,attack_type:'MANUAL'})});
     const d=await r.json();
     if(d.blocked){
       flashRed();fireNeuralParticle(d.threat_type||'INJECTION',true);
@@ -992,7 +1001,7 @@ function row(k,v){return `<div class="rt-row"><span>${k}</span><span>${v}</span>
 // ═════════════════════════════════════════════════════════════════════
 // Agent + Campaigns + Defense Log + Analytics
 // ═════════════════════════════════════════════════════════════════════
-async function agentAction(action){try{await fetch(`${API}/agents/${action}`,{method:'POST'});pollStats();checkHealth();}catch{}}
+async function agentAction(action){try{await apiFetch(`${API}/agents/${action}`,{method:'POST'});pollStats();checkHealth();}catch{}}
 
 function renderCampaigns(camps){
   const el=document.getElementById('camp-list');
@@ -1114,7 +1123,7 @@ function setEl(id,val,color){const e=document.getElementById(id);if(!e)return;e.
 // ═════════════════════════════════════════════════════════════════════
 async function loadInitialLogs() {
   try {
-    const r = await fetch(`${API}/analytics/logs`);
+    const r = await apiFetch(`${API}/analytics/logs`);
     const d = await r.json();
     if(d.events && d.events.length) {
       // Populate defense log + latency chart + threat bars from historical events
