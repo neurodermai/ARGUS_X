@@ -48,15 +48,21 @@ body::after{
 /* ══ LAYOUT ════════════════════════════════════════════════════════ */
 .app{display:flex;flex-direction:column;height:100vh}
 
+/* ── Pip Stagger Animation ───────────────────────────────────────── */
+@keyframes pip-fill{from{opacity:0;transform:scaleY(0.3)}to{opacity:1;transform:scaleY(1)}}
+.soph-pip.on{animation:pip-fill .2s ease forwards}
+
 /* ── Header ─────────────────────────────────────────────────────── */
 .hdr{height:50px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid;border-image:var(--grad-line) 1;flex-shrink:0;background:rgba(3,5,8,.9);backdrop-filter:blur(8px);z-index:100}
 .hdr-logo{display:flex;align-items:center;gap:10px;min-width:200px}
-.hdr-logo svg{width:28px;height:28px;filter:drop-shadow(0 0 8px var(--cyan))}
+.hdr-logo svg{width:28px;height:28px;filter:drop-shadow(0 0 8px var(--cyan));animation:logo-pulse 3s ease-in-out infinite}
+@keyframes logo-pulse{0%,100%{filter:drop-shadow(0 0 8px var(--cyan))}50%{filter:drop-shadow(0 0 16px var(--cyan)) drop-shadow(0 0 3px rgba(0,229,255,.6))}}
 .hdr-title{font-family:var(--font-display);font-size:17px;font-weight:900;color:var(--cyan);letter-spacing:.15em;text-shadow:0 0 20px rgba(0,229,255,.4)}
 .hdr-sub{font-family:var(--font-mono);font-size:7px;letter-spacing:.25em;color:var(--muted);margin-top:-2px}
 .hdr-stats{display:flex;gap:22px;flex:1;justify-content:center}
 .hdr-stat{text-align:center}
-.hdr-stat .hn{font-family:var(--font-display);font-size:17px;font-weight:700;line-height:1.1;transition:color .3s}
+.hdr-stat .hn{font-family:var(--font-display);font-size:17px;font-weight:700;line-height:1.1;transition:color .3s,text-shadow .3s}
+.hdr-stat .hn.flash{text-shadow:0 0 10px currentColor}
 .hdr-stat .hl{font-family:var(--font-mono);font-size:6.5px;letter-spacing:.2em;color:var(--muted);margin-top:1px}
 .hdr-pills{display:flex;gap:8px;min-width:220px;justify-content:flex-end}
 .pill{font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;padding:4px 12px;border-radius:20px;display:flex;align-items:center;gap:6px}
@@ -722,8 +728,7 @@ function fireNeuralParticle(type, blocked) {
   neuralParticles.push({x:src.x,y:src.y,tx:neuralW/2,ty:neuralH/2,r:2.5+Math.random(),color:colorHex,life:1,blocked,hit:false});
 }
 
-// Auto-spawn ambient particles
-setInterval(() => { if(neuralCtx) fireNeuralParticle('CLEAN', false); }, 1400);
+// Ambient particles now fired from boot sequence at 800ms interval
 
 // ═════════════════════════════════════════════════════════════════════
 // WebSocket
@@ -793,8 +798,10 @@ async function pollXAI() {
       const sc = soph<=3?'g':soph<=6?'a':'r';
       const sophColor = soph<=3?'var(--green)':soph<=6?'var(--amber)':'var(--red)';
       const pips = Array.from({length:10},(_,i)=>`<div class="soph-pip ${i<soph?'on':''} ${i<soph?sc:''}" style="width:6px;height:8px"></div>`).join('');
-      const layers = (dec.layer_decisions||[]).map(l => {
-        const pct = Math.round((l.confidence||0)*100);
+      let layerArr = dec.layer_decisions || [];
+      if(typeof layerArr === 'string') { try { layerArr = JSON.parse(layerArr); } catch { layerArr = []; } }
+      const layers = layerArr.map(l => {
+        const pct = Math.round(l.confidence||0);
         const c = pct>75?'var(--red)':pct>50?'var(--amber)':'var(--green)';
         return `<div class="xai-layer"><div class="xl-name">${l.layer_name||''}</div><div class="xl-track"><div class="xl-fill" style="width:${pct}%;background:${c}"></div></div><div class="xl-pct">${pct}%</div></div>`;
       }).join('');
@@ -808,8 +815,8 @@ async function pollXAI() {
           </div>
         </div>
         <div class="xai-layers">${layers}</div>
-        ${dec.reasoning?`<div class="xai-reason">🧠 ${esc(dec.reasoning)}</div>`:''}
-        ${dec.mutations_spawned?`<div class="xai-muts">+${dec.mutations_spawned} variants pre-blocked</div>`:''}
+        ${(dec.primary_reason||dec.reasoning)?`<div class="xai-reason">🧠 ${esc(dec.primary_reason||dec.reasoning)}</div>`:''}
+        ${(dec.mutations_spawned||dec.evolution_note)?`<div class="xai-muts">${dec.evolution_note||''}</div>`:''}
       </div>`;
     }).join('');
   } catch {}
@@ -826,8 +833,8 @@ async function pollStats() {
     animateCounter('h-blocked', d.blocked||0, 'var(--red)');
     animateCounter('h-total', d.total||0, 'var(--cyan)');
     setEl('h-defense', (d.defense_rate||0).toFixed(1)+'%', 'var(--green)');
-    setEl('h-bypasses', d.agent?.bypasses_found||0, 'var(--amber)');
-    setEl('h-cycles', d.agent?.current_tier||0, 'var(--blue)');
+    setEl('h-bypasses', (d.agent?.bypasses_found||0)+(d.blue_agent?.bypasses||0), 'var(--amber)');
+    animateCounter('h-cycles', d.battle?.tick||d.agent?.cycle_count||0, 'var(--blue)');
     S.blocked=d.blocked||0; S.sanitized=d.sanitized||0; S.clean=d.clean||0; S.total=d.total||0;
     // Protection
     setEl('prot-n', (d.protect_pct||0).toFixed(1)+'%');
@@ -837,21 +844,23 @@ async function pollStats() {
     updateDonut();
     // System overview
     setEl('so-blocked', d.blocked||0); setEl('so-clean', d.clean||0); setEl('so-total', d.total||0); setEl('s-tot', d.total||0);
-    // Mutations
-    if(d.mutations_preblocked) { S.mutations = Math.max(S.mutations, d.mutations_preblocked); setEl('h-mutations', S.mutations); setEl('total-mutations', S.mutations); setEl('so-variants', S.mutations); }
+    // Mutations — combine preblocked + dynamic rules
+    const mutTotal = Math.max(d.mutations_preblocked||0, d.dynamic_rules_count||0, S.mutations);
+    if(mutTotal > 0) { S.mutations = mutTotal; setEl('h-mutations', S.mutations); setEl('total-mutations', S.mutations); setEl('so-variants', S.mutations); }
     // Agent
     if(d.agent) {
       setEl('ag-attacks', d.agent.attacks_tried||0);
       setEl('ag-bypasses', d.agent.bypasses_found||0);
-      setEl('ag-patches', d.agent.auto_patches||0);
-      setEl('ag-cycles', d.agent.current_tier||0);
+      setEl('ag-patches', d.blue_agent?.auto_patches||d.agent.auto_patches||0);
+      setEl('ag-cycles', d.agent.cycle_count||d.battle?.tick||0);
       const ra = d.agent.attacks_tried||0, rb = d.agent.bypasses_found||0;
       setEl('ba-rattacks', ra); setEl('ba-bypasses', rb);
       const brate = ra>0?Math.round(((ra-rb)/ra)*100):100;
       setEl('ba-brate', brate+'%');
       document.getElementById('ba-bluebar').style.width = brate+'%';
       document.getElementById('ba-redbar').style.width = Math.min((rb/Math.max(ra,1))*500,100)+'%';
-      setEl('ba-tier', d.agent.current_tier||1);
+      setEl('ba-tier', d.battle?.red_tier||d.agent.current_tier||1);
+      document.getElementById('ba-redbar').style.width = Math.min(((d.battle?.red_tier||1)/5)*100,100)+'%';
     }
     // Campaigns
     if(d.campaigns && d.campaigns.length > 0) renderCampaigns(d.campaigns);
@@ -1101,6 +1110,42 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 function setEl(id,val,color){const e=document.getElementById(id);if(!e)return;e.textContent=val;if(color)e.style.color=color;}
 
 // ═════════════════════════════════════════════════════════════════════
+// Initial Logs Load (populates defense log + latency chart on boot)
+// ═════════════════════════════════════════════════════════════════════
+async function loadInitialLogs() {
+  try {
+    const r = await fetch(`${API}/analytics/logs`);
+    const d = await r.json();
+    if(d.events && d.events.length) {
+      // Populate defense log + latency chart + threat bars from historical events
+      d.events.slice().reverse().forEach(ev => {
+        const action = (ev.action||'').toLowerCase();
+        addDefenseLog(action, ev);
+        if(ev.latency_ms) { S.latencies.push(ev.latency_ms); }
+        if(ev.threat_type && action === 'blocked') { S.threats[ev.threat_type]=(S.threats[ev.threat_type]||0)+1; }
+        S.feedN++;
+      });
+      if(S.latencies.length > 20) S.latencies = S.latencies.slice(-20);
+      renderLatChart();
+      renderThreatBars();
+      document.getElementById('feed-count').textContent = S.feedN;
+      // Also add events to the feed
+      const feed = document.getElementById('feed');
+      d.events.forEach(ev => {
+        const action = (ev.action||'').toLowerCase();
+        const soph = ev.sophistication_score || 0;
+        const sc = soph<=3?'g':soph<=6?'a':'r';
+        const pips = Array.from({length:10},(_,i)=>`<div class="soph-pip ${i<soph?'on':''} ${i<soph?sc:''}" style="animation-delay:${i*50}ms"></div>`).join('');
+        const el = document.createElement('div');
+        el.className = `fi ${action}`;
+        el.innerHTML = `<div class="fi-row1"><div class="fi-badge fb-${action}">${aIcon(action)} ${action.toUpperCase()}</div><div class="fi-soph"><div class="soph-bar">${pips}</div><span style="font-size:8px">${soph}/10</span></div></div><div class="fi-text">${esc(ev.preview||'')}</div><div class="fi-meta"><span class="fi-type">${ev.threat_type||'CLEAN'}</span><span>·</span><span>${ev.latency_ms?Math.round(ev.latency_ms)+'ms':''}</span>${ev.attack_fingerprint?`<span class="fi-fp">· ${ev.attack_fingerprint}</span>`:''}</div>`;
+        feed.appendChild(el);
+      });
+    }
+  } catch {}
+}
+
+// ═════════════════════════════════════════════════════════════════════
 // BOOT
 // ═════════════════════════════════════════════════════════════════════
 initNeuralCanvas();
@@ -1109,10 +1154,12 @@ connectWS();
 checkHealth();
 pollStats();
 pollXAI();
+loadInitialLogs();
 drawClusterMap();
 setInterval(pollStats, 3500);
 setInterval(checkHealth, 6000);
 setInterval(pollXAI, 4000);
+setInterval(() => { if(neuralCtx) fireNeuralParticle('CLEAN', Math.random()>0.6); }, 800);
 </script>
 </body>
 </html>
