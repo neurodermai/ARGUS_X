@@ -1,16 +1,32 @@
-FROM python:3.11-slim
+# ══════════════════════════════════════════════════════════════════════
+# ARGUS-X — Multi-Stage Production Dockerfile
+# Stage 1: Install all deps (including gcc/g++ for native extensions)
+# Stage 2: Copy only runtime artifacts (no build tools in final image)
+# ══════════════════════════════════════════════════════════════════════
 
-WORKDIR /app
+# ── Builder Stage ─────────────────────────────────────────────────────
+FROM python:3.11-slim AS builder
 
-# Install minimal system deps
+WORKDIR /build
+
+# Install build-time system deps (gcc/g++ for native extensions)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc && rm -rf /var/lib/apt/lists/*
+    gcc g++ && rm -rf /var/lib/apt/lists/*
 
-# Copy and install slim requirements (no torch/sentence-transformers = ~1.5GB image)
+# Install Python dependencies into /usr/local
 COPY requirements-deploy.txt .
 RUN pip install --no-cache-dir -r requirements-deploy.txt
 
-# Copy project
+# ── Runtime Stage ─────────────────────────────────────────────────────
+FROM python:3.11-slim AS runner
+
+WORKDIR /app
+
+# Copy installed Python packages from builder (no gcc/g++ in this layer)
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy project files
 COPY . .
 
 # Set working directory to backend

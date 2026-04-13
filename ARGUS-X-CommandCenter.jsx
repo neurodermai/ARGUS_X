@@ -581,7 +581,10 @@ function MiniClusterMap({ attacks }) {
     };
 
     // Seed nodes from attacks
-    attacks.slice(-40).forEach(a => {
+    const recentAttacks = attacks.slice(-40);
+    const activeIds = new Set(recentAttacks.map(a => a.id));
+
+    recentAttacks.forEach(a => {
       const c = centers[a.type] || { x: W*0.5, y: H*0.5 };
       const id = a.id;
       if (!nodesRef.current[id]) {
@@ -594,6 +597,13 @@ function MiniClusterMap({ attacks }) {
           color: THREAT_COLORS[a.type] || "#888",
           cx: c.x, cy: c.y,
         };
+      }
+    });
+
+    // Prune stale nodes no longer in the active window
+    Object.keys(nodesRef.current).forEach(id => {
+      if (!activeIds.has(id) && !activeIds.has(Number(id))) {
+        delete nodesRef.current[id];
       }
     });
 
@@ -641,7 +651,7 @@ function MiniClusterMap({ attacks }) {
 // MAIN COMMAND CENTER
 // ─────────────────────────────────────────────────────────────────────
 export default function CommandCenter() {
-  injectFonts();
+  useEffect(() => { injectFonts(); }, []);
 
   const [attacks, setAttacks] = useState([]);
   const [stats, setStats] = useState({ blocked:0, muts:0, bypasses:0, patched:0, total:0 });
