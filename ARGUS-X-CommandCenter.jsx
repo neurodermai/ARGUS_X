@@ -81,6 +81,35 @@ function generateAttack() {
   };
 }
 
+// ── Backend Configuration ─────────────────────────────────────────────
+const API_URL = window.__ARGUS_API_URL__ || "";
+const WS_URL = API_URL ? API_URL.replace(/^http/, "ws") : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+
+function transformEvent(msg) {
+  const d = msg.data || msg;
+  const soph = d.sophistication || 0;
+  return {
+    id: d.id || uid(),
+    type: d.threat_type || "UNKNOWN",
+    tier: Math.max(1, Math.min(5, Math.ceil(soph / 2) || 1)),
+    soph,
+    blocked: d.action === "BLOCKED",
+    text: d.preview || "",
+    score: typeof d.score === "number" ? d.score : 0,
+    latency: typeof d.latency_ms === "number" ? +d.latency_ms.toFixed(1) : 0,
+    reason: d.explanation || "Pending XAI analysis",
+    muts: d.mutations_preblocked || 0,
+    ts: new Date(d.ts || Date.now()),
+    layer: d.layer || "UNKNOWN",
+  };
+}
+
+function stableHash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // NEURAL THREAT VISUALIZER (Canvas)
 // ─────────────────────────────────────────────────────────────────────
@@ -299,10 +328,13 @@ function SophMeter({ score }) {
 // ─────────────────────────────────────────────────────────────────────
 function XAICard({ attack, index }) {
   const color = THREAT_COLORS[attack.type] || "#ff1744";
+  const h = stableHash(String(attack.id));
+  const jitter = (seed) => (((h * seed) & 0xffff) / 0xffff) * 0.2 - 0.1;
+  const base = attack.score || 0.5;
   const layerScores = [
-    { name: "Regex Engine", v: attack.blocked ? randFloat(0.6, 0.99) : randFloat(0.1, 0.4) },
-    { name: "ML Classifier", v: attack.blocked ? randFloat(0.75, 0.98) : randFloat(0.4, 0.72) },
-    { name: "Output Auditor", v: attack.blocked ? randFloat(0.5, 0.95) : randFloat(0.2, 0.5) },
+    { name: "Regex Engine", v: Math.min(0.99, Math.max(0.05, (attack.blocked ? base * 0.8 : base * 0.35) + jitter(7))) },
+    { name: "ML Classifier", v: Math.min(0.99, Math.max(0.05, (attack.blocked ? base * 0.95 : base * 0.55) + jitter(13))) },
+    { name: "Output Auditor", v: Math.min(0.99, Math.max(0.05, (attack.blocked ? base * 0.7 : base * 0.3) + jitter(23))) },
   ];
 
   return (
@@ -626,61 +658,128 @@ export default function CommandCenter() {
   const attacksRef = useRef(attacks);
   attacksRef.current = attacks;
 
-  // Main simulation loop
+  // ── WebSocket: Live attack stream from backend ──────────────────────
   useEffect(() => {
-    const interval = setInterval(() => {
-      const atk = generateAttack();
-      atk.tier = Math.min(5, Math.max(1, Math.round(1 + tick * 0.04 + (Math.random()-0.5))));
-      atk.soph = Math.min(10, atk.tier * 2 + randInt(0,2));
+    let ws;
+    let reconnectTimer;
+    let isMounted = true;
 
-      setAttacks(prev => [atk, ...prev.slice(0, 59)]);
-      setTick(t => t + 1);
-      setStats(prev => ({
-        total:    prev.total + 1,
-        blocked:  prev.blocked + (atk.blocked ? 1 : 0),
-        muts:     prev.muts + atk.muts,
-        bypasses: prev.bypasses + (atk.blocked ? 0 : 1),
-        patched:  prev.patched + (atk.blocked ? 0 : 1),
-      }));
-      setSophHistory(prev => [...prev.slice(-19), atk.soph]);
-      setLatHistory(prev => [...prev.slice(-19), atk.latency]);
-      setThreatLevel(lv => {
-        const newLv = Math.min(5, Math.max(0, lv + (atk.soph > 7 ? 1 : atk.soph < 3 ? -0.5 : 0)));
-        return newLv;
-      });
-      setTier(Math.min(5, 1 + Math.floor(tick * 0.04)));
+    function connect() {
+      if (!isMounted) return;
+      try {
+        ws = new WebSocket(`${WS_URL}/ws/live`);
+      } catch (e) {
+        reconnectTimer = setTimeout(connect, 5000);
+        return;
+      }
 
-      // Defense log
-      const logEntry = {
-        id: uid(),
-        ts: new Date().toLocaleTimeString("en-US",{hour12:false}),
-        type: atk.blocked ? "BLOCK" : "BYPASS",
-        msg: atk.blocked
-          ? `${atk.type.replace(/_/g," ")} blocked · T${atk.tier} · ${Math.round(atk.score*100)}% · ${atk.latency}ms`
-          : `⚠ BYPASS: ${atk.type.replace(/_/g," ")} · auto-patching`,
-        color: atk.blocked ? "#00e676" : "#ffab00",
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "ping") return;
+
+          if (msg.type === "history") {
+            const atk = transformEvent(msg);
+            if (atk.type === "UNKNOWN" && !atk.blocked) return;
+            setAttacks(prev => [...prev, atk].slice(0, 60));
+            return;
+          }
+
+          if (msg.type === "attack" || msg.type === "sanitized") {
+            const atk = transformEvent(msg);
+            setAttacks(prev => [atk, ...prev.slice(0, 59)]);
+            if (atk.latency > 0) {
+              setLatHistory(prev => [...prev.slice(-19), atk.latency]);
+            }
+            if (atk.soph > 0) {
+              setSophHistory(prev => [...prev.slice(-19), atk.soph]);
+            }
+
+            // Defense log
+            const logEntry = {
+              id: uid(),
+              ts: new Date().toLocaleTimeString("en-US", { hour12: false }),
+              type: atk.blocked ? "BLOCK" : "BYPASS",
+              msg: atk.blocked
+                ? `${atk.type.replace(/_/g, " ")} blocked · T${atk.tier} · ${Math.round(atk.score * 100)}% · ${atk.latency}ms`
+                : `⚠ BYPASS: ${atk.type.replace(/_/g, " ")} · auto-patching`,
+              color: atk.blocked ? "#00e676" : "#ffab00",
+            };
+            if (atk.muts > 0) {
+              setDefenseLog(prev => [{
+                id: uid(), ts: logEntry.ts, type: "MUTATE",
+                msg: `Mutation engine: +${atk.muts} variants pre-blocked`,
+                color: "#5a0090",
+              }, logEntry, ...prev.slice(0, 38)]);
+            } else {
+              setDefenseLog(prev => [logEntry, ...prev.slice(0, 39)]);
+            }
+            return;
+          }
+        } catch (err) {
+          // Silently ignore parse errors
+        }
       };
-      if (atk.muts > 0) {
-        setDefenseLog(prev => [{
-          id: uid(), ts: logEntry.ts, type: "MUTATE",
-          msg: `Mutation engine: +${atk.muts} variants pre-blocked`,
-          color: "#5a0090",
-        }, logEntry, ...prev.slice(0, 38)]);
-      } else {
-        setDefenseLog(prev => [logEntry, ...prev.slice(0, 39)]);
-      }
 
-      // Campaign detection (every 20 ticks)
-      if (tick % 20 === 0 && tick > 0) {
-        setCampaignCount(c => c + 1);
-        const camThreat = randItem(THREAT_TYPES);
-        setShowAlert(true);
-        setAlertMsg(`CAMPAIGN DETECTED: ${camThreat.replace(/_/g," ")} · ${randInt(5,18)} events from ${randInt(3,9)} unique sources`);
-        setTimeout(() => setShowAlert(false), 5000);
+      ws.onclose = () => {
+        if (isMounted) reconnectTimer = setTimeout(connect, 3000);
+      };
+      ws.onerror = () => { try { ws.close(); } catch(_) {} };
+    }
+
+    connect();
+    return () => { isMounted = false; clearTimeout(reconnectTimer); if (ws) { try { ws.close(); } catch(_) {} } };
+  }, []);
+
+  // ── Polling: Analytics stats from backend ───────────────────────────
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchStats() {
+      try {
+        const res = await fetch(`${API_URL}/api/v1/analytics/stats`);
+        if (!res.ok || !isMounted) return;
+        const data = await res.json();
+
+        setStats({
+          blocked:  data.blocked || 0,
+          muts:     data.mutations_preblocked || 0,
+          bypasses: data.battle?.red_bypasses ?? Math.max(0, (data.total || 0) - (data.blocked || 0)),
+          patched:  data.blue_agent?.auto_patches || 0,
+          total:    data.total || 0,
+        });
+
+        if (data.battle) {
+          setTier(data.battle.red_tier || 1);
+          setTick(data.battle.tick || 0);
+        }
+
+        // Derive threat level from defense rate
+        if (typeof data.defense_rate === "number") {
+          const r = data.defense_rate;
+          setThreatLevel(r >= 98 ? 0 : r >= 95 ? 1 : r >= 90 ? 2 : r >= 80 ? 3 : r >= 60 ? 4 : 5);
+        }
+
+        // Campaign detection
+        const camps = data.campaigns || [];
+        setCampaignCount(prev => {
+          if (camps.length > prev && camps.length > 0) {
+            const c = camps[camps.length - 1];
+            setShowAlert(true);
+            setAlertMsg(`CAMPAIGN DETECTED: ${(c.threat_type || "MULTI-VECTOR").replace(/_/g, " ")} · ${c.event_count || "?"} events from ${c.source_count || "?"} unique sources`);
+            setTimeout(() => setShowAlert(false), 5000);
+          }
+          return camps.length;
+        });
+      } catch (_) {
+        // Backend unreachable — retain current state
       }
-    }, 1400);
-    return () => clearInterval(interval);
-  }, [tick]);
+    }
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 3000);
+    return () => { isMounted = false; clearInterval(interval); };
+  }, []);
 
   const blockRate = stats.total > 0 ? Math.round((stats.blocked / stats.total) * 100) : 100;
   const sophAvg = sophHistory.length ? +(sophHistory.reduce((a,b)=>a+b,0)/sophHistory.length).toFixed(1) : 0;
