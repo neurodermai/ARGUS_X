@@ -8,6 +8,21 @@ from typing import Optional
 from datetime import datetime
 import time, uuid
 
+# Rate limiting (graceful — no-op if slowapi not installed)
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    limiter = Limiter(key_func=get_remote_address)
+except ImportError:
+    limiter = None
+
+
+def _rate_limit(limit_string: str):
+    """Return rate-limit decorator, or no-op if slowapi unavailable."""
+    if limiter:
+        return limiter.limit(limit_string)
+    return lambda f: f
+
 router = APIRouter()
 
 
@@ -18,6 +33,7 @@ class RedTeamRequest(BaseModel):
 
 
 @router.post("/redteam")
+@_rate_limit("30/minute")
 async def redteam_test(req: RedTeamRequest, request: Request):
     """
     Manual red team test — run an attack against the live firewall.
