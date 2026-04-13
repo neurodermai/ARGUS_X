@@ -22,6 +22,7 @@ async def get_battle_state(request: Request):
 async def get_battle_history(request: Request, limit: int = 20):
     """Get recent battle ticks from database."""
     try:
+        app = request.app
         if app.state.db.available:
             result = await app.state.db._run_sync(
                 lambda: app.state.db.client.table("battle_state")

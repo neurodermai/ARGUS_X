@@ -54,6 +54,8 @@ async def get_stats(request: Request):
         "battle": battle_state,
         "correlator": correlator_status,
         "evolution": evolution,
+        "sparkline_data": app.state.evolution.get_sparkline_data(30) if hasattr(app.state, 'evolution') else [],
+        "clusters": app.state.clusterer.get_cluster_summary() if hasattr(app.state, 'clusterer') else {},
         "campaigns": app.state.correlator.get_active_campaigns(),
         "threat_velocity": app.state.correlator.get_threat_velocity(),
         "top_fingerprints": app.state.correlator.get_top_fingerprints(),

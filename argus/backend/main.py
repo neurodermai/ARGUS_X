@@ -26,7 +26,9 @@ load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 # Internal imports
 from utils.logger import setup_logger
@@ -220,6 +222,15 @@ async def health():
 async def global_error(req: Request, exc: Exception):
     log.error(f"Unhandled: {exc}", exc_info=True)
     return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+# ─── Frontend Serving ────────────────────────────────────────────────
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+if FRONTEND_DIR.exists():
+    @app.get("/")
+    async def serve_frontend():
+        return FileResponse(str(FRONTEND_DIR / "index.html"))
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
 if __name__ == "__main__":

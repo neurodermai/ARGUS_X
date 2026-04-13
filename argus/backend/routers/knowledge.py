@@ -1,6 +1,6 @@
 """
 ARGUS-X — Knowledge Router
-Endpoints: /clusters, /fingerprints, /campaigns, /xai/decisions, /battle/state
+Endpoints: /clusters, /fingerprints, /campaigns, /evolution
 """
 from fastapi import APIRouter, Request
 
@@ -34,25 +34,6 @@ async def get_campaigns(request: Request):
         "active": app.state.correlator.get_active_campaigns(),
         "velocity": app.state.correlator.get_threat_velocity(),
     }
-
-
-@router.get("/xai/decisions")
-async def get_xai_decisions(request: Request, limit: int = 20):
-    """Get recent XAI decisions."""
-    app = request.app
-    decisions = await app.state.db.get_recent_xai_decisions(limit)
-    return {"decisions": decisions, "count": len(decisions)}
-
-
-@router.get("/battle/state")
-async def get_battle_state(request: Request):
-    """Get current AI vs AI battle state."""
-    app = request.app
-    if hasattr(app.state, 'battle'):
-        return app.state.battle.get_state()
-    # Fallback to DB
-    state = await app.state.db.get_battle_state()
-    return state if state else {"status": "NOT_STARTED", "tick": 0}
 
 
 @router.get("/evolution")

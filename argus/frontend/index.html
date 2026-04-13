@@ -6,7 +6,7 @@
 <title>ARGUS-X — Defense Command Center</title>
 <meta name="description" content="ARGUS-X Autonomous AI Defense Operating System — The AI that defends AI"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700;900&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -20,7 +20,7 @@
   --blue:#2979ff;--orange:#ff6d00;
   --text:#ddeeff;--muted:#3d5275;
   --font-mono:'Share Tech Mono',monospace;
-  --font-ui:'Exo 2',sans-serif;
+  --font-ui:'Barlow',sans-serif;
   --font-display:'Orbitron',sans-serif;
 }
 html,body{height:100%;overflow:hidden;background:var(--void);color:var(--text);font-family:var(--font-ui);font-size:13px;-webkit-font-smoothing:antialiased}
@@ -114,9 +114,10 @@ header{
 .tp{display:none;flex:1;flex-direction:column;overflow:hidden}.tp.on{display:flex}
 
 /* ── Command Center Tab ─────────────────────────────────────────────── */
-.cc-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;flex:1;overflow:hidden}
+.cc-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 110px;flex:1;overflow:hidden}
 .cc-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}
 .cc-cell:nth-child(2n){border-right:none}
+.cc-cell.cc-log{grid-column:1/-1;border-bottom:none}
 .cc-cell-title{padding:7px 12px;font-size:8px;font-weight:700;letter-spacing:.2em;color:var(--muted);text-transform:uppercase;font-family:var(--font-mono);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:6px}
 .cc-cell-body{flex:1;overflow:hidden;position:relative}
 #neural-canvas{display:block;width:100%;height:100%}
@@ -253,6 +254,35 @@ header{
 .sys-row{display:flex;justify-content:space-between;font-size:10px;font-family:var(--font-mono);line-height:2.1}
 .sys-row span:first-child{color:var(--muted)}
 
+/* ── Defense Log ────────────────────────────────────────────────────── */
+#defense-log{flex:1;overflow-y:auto;padding:6px 10px;display:flex;flex-direction:column;gap:1px;font-family:var(--font-mono);font-size:9px}
+.dlog-line{animation:dlog-in .2s ease;line-height:1.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes dlog-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.dlog-ts{color:var(--muted)}
+.dlog-tag{font-weight:700;padding:1px 5px;border-radius:2px;letter-spacing:.08em;margin:0 4px}
+.dt-block{background:rgba(0,230,118,.12);color:var(--green)}
+.dt-bypass{background:rgba(255,171,0,.12);color:var(--amber)}
+.dt-mutate{background:rgba(213,0,249,.12);color:var(--purple)}
+.dt-patch{background:rgba(0,229,255,.12);color:var(--cyan)}
+.dt-clean{background:rgba(41,121,255,.08);color:var(--blue)}
+
+/* ── Threat Level Bar ──────────────────────────────────────────────── */
+.tl-track{height:8px;background:var(--border);border-radius:4px;overflow:hidden;position:relative}
+.tl-fill{height:100%;border-radius:4px;transition:width 1s ease,background 1s ease}
+.tl-labels{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:7px;color:var(--muted);margin-top:3px;letter-spacing:.1em}
+.tl-current{font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:4px}
+@keyframes tl-flash{0%,100%{box-shadow:0 0 0 rgba(255,23,68,0)}50%{box-shadow:0 0 12px rgba(255,23,68,.6)}}
+
+/* ── Sparkline ─────────────────────────────────────────────────────── */
+.sparkline-wrap{display:flex;align-items:center;gap:12px}
+.spark-number{font-family:var(--font-display);font-size:22px;font-weight:700;line-height:1}
+.spark-arrow{font-size:16px;font-weight:700}
+.spark-label{font-family:var(--font-mono);font-size:8px;color:var(--muted);letter-spacing:.1em;margin-top:2px}
+.spark-status{font-family:var(--font-mono);font-size:9px;margin-top:4px}
+
+/* ── Cluster Map ───────────────────────────────────────────────────── */
+#cluster-canvas{display:block;width:100%;height:120px;border-radius:4px;background:#050a18}
+
 /* ══ OVERLAYS ══════════════════════════════════════════════════════════ */
 .flash{position:fixed;inset:0;pointer-events:none;z-index:9997;opacity:0;transition:opacity .04s}.flash.on{opacity:1}
 .alert-overlay{position:fixed;bottom:20px;right:20px;z-index:9999;background:rgba(7,12,24,.98);border:1px solid var(--red);border-radius:10px;padding:16px 20px;max-width:320px;box-shadow:0 0 30px rgba(255,23,68,.4);transform:translateX(400px);transition:transform .4s cubic-bezier(.22,1,.36,1)}
@@ -361,6 +391,10 @@ header{
         </div>
       </div>
     </div>
+    <div class="cc-cell cc-log">
+      <div class="cc-cell-title"><div class="ph-dot" style="background:var(--blue);box-shadow:0 0 6px var(--blue)"></div>DEFENSE LOG</div>
+      <div class="cc-cell-body" id="defense-log"></div>
+    </div>
   </div>
 
   <!-- Chat -->
@@ -441,6 +475,12 @@ header{
   <div class="ph"><div class="ph-title"><div class="ph-dot" style="background:var(--purple);box-shadow:0 0 6px var(--purple)"></div>ANALYTICS</div></div>
   <div class="rp">
     <div class="card">
+      <div class="card-title">Threat Level</div>
+      <div class="tl-current" id="tl-current" style="color:var(--green)">MINIMAL</div>
+      <div class="tl-track"><div class="tl-fill" id="tl-fill" style="width:5%;background:var(--green)"></div></div>
+      <div class="tl-labels"><span>MINIMAL</span><span>LOW</span><span>MED</span><span>HIGH</span><span>CRIT</span></div>
+    </div>
+    <div class="card">
       <div class="card-title">Protection Rate</div>
       <div class="prot-pct" id="prot-n">—</div>
       <div class="meter"><div class="meter-fill" id="prot-bar" style="width:0%"></div></div>
@@ -462,12 +502,28 @@ header{
       </div>
     </div>
     <div class="card">
+      <div class="card-title">Sophistication Trend</div>
+      <div class="sparkline-wrap">
+        <div>
+          <div class="spark-number" id="spark-avg" style="color:var(--green)">0.0</div>
+          <div class="spark-label">AVG SCORE</div>
+        </div>
+        <div class="spark-arrow" id="spark-arrow" style="color:var(--green)">→</div>
+        <svg id="sparkline" width="120" height="32" viewBox="0 0 120 32"><polyline id="spark-line" fill="none" stroke="var(--cyan)" stroke-width="1.5" points="0,30"/></svg>
+      </div>
+      <div class="spark-status" id="spark-status" style="color:var(--green)">STABLE — No escalation</div>
+    </div>
+    <div class="card">
       <div class="card-title">Threat Types</div>
       <div class="tbar" id="threat-bars"><div style="font-size:10px;color:var(--muted);font-family:monospace">No threats yet</div></div>
     </div>
     <div class="card">
       <div class="card-title">Latency — Last 20</div>
       <div class="lat-chart" id="lat-chart"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Cluster Map</div>
+      <canvas id="cluster-canvas"></canvas>
     </div>
     <div class="card">
       <div class="card-title">System Status</div>
@@ -696,10 +752,10 @@ async function pollXAI() {
         const c = pct>75?"var(--red)":pct>50?"var(--amber)":"var(--green)";
         return `<div class="xai-layer"><div class="xl-name">${l.layer_name||""}</div><div class="xl-track"><div class="xl-fill" style="width:${pct}%;background:${c}"></div></div><div class="xl-pct">${pct}%</div></div>`;
       }).join("");
-      return `<div class="xai-card" style="border-left:3px solid ${THREAT_COLORS[dec.threat_type]||"var(--red)"}">
+      return `<div class="xai-card" style="border-left:3px solid ${THREAT_COLORS[dec.pattern_family||dec.threat_type]||"var(--red)"}">
         <div class="xai-head">
-          <div><div class="xai-type">${(dec.threat_type||"INJECTION").replace(/_/g," ")} · ${dec.sophistication_score||0}/10</div>
-          <div class="xai-text">${esc((dec.input_preview||"").slice(0,70))}</div></div>
+          <div><div class="xai-type">${(dec.pattern_family||dec.threat_type||"INJECTION").replace(/_/g," ")} · ${dec.sophistication_score||0}/10</div>
+          <div class="xai-text">${esc((dec.attack_preview||"").slice(0,70))}</div></div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
             <div class="xai-verdict xv-${(dec.verdict||"blocked").toLowerCase()}">${dec.verdict||"BLOCKED"}</div>
             <div class="fi-soph"><div class="soph-bar">${sophPips}</div><span style="font-size:9px;color:${sophColor}">${soph}/10</span></div>
@@ -747,6 +803,9 @@ function onEvent(d) {
   }
   if(d.threat_type) { S.threats[d.threat_type]=(S.threats[d.threat_type]||0)+1; renderThreatBars(); }
   if(d.mutations_preblocked) { S.mutations+=d.mutations_preblocked; setEl("h-mutations",S.mutations); setEl("total-mutations",S.mutations); setEl("so-variants",S.mutations); }
+
+  // Defense Log entry
+  addDefenseLog(a, d);
 
   // Feed card
   const el = document.createElement("div");
@@ -808,6 +867,10 @@ async function pollStats() {
     }
     if(d.mutations_preblocked){S.mutations=Math.max(S.mutations,d.mutations_preblocked);setEl("h-mutations",S.mutations);setEl("total-mutations",S.mutations);setEl("so-variants",S.mutations);}
     if(d.campaigns&&d.campaigns.length>0) renderCampaigns(d.campaigns);
+    // New analytics components
+    updateThreatLevel(d);
+    updateSparkline(d);
+    updateClusterMap(d);
   } catch {}
 }
 
@@ -950,6 +1013,155 @@ function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").repl
 function setEl(id,val,color){const e=document.getElementById(id);if(!e)return;e.textContent=val;if(color)e.style.color=color;}
 
 // ═════════════════════════════════════════════════════════════════════
+// DEFENSE LOG
+// ═════════════════════════════════════════════════════════════════════
+function addDefenseLog(action, d) {
+  const log = document.getElementById('defense-log');
+  if(!log) return;
+  const now = new Date();
+  const ts = [now.getHours(),now.getMinutes(),now.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');
+  const tagMap = {
+    blocked: ['BLOCK','dt-block'],
+    sanitized: ['BYPASS','dt-bypass'],
+    clean: ['CLEAN','dt-clean'],
+  };
+  let [tag,cls] = tagMap[action] || ['EVENT','dt-clean'];
+  let msg = '';
+  if(action==='blocked') msg = `${d.threat_type||'INJECTION'} blocked — ${d.method||'FIREWALL'} (${(d.score*100||0).toFixed(0)}%)`;
+  else if(action==='sanitized') msg = `Output sanitized — ${d.threat_type||'POLICY'} detected`;
+  else msg = `Clean request processed (${d.latency_ms?d.latency_ms.toFixed(0)+'ms':'—'})`;
+  // Mutations sub-line
+  if(d.mutations_preblocked && d.mutations_preblocked > 0) {
+    const ml = document.createElement('div');
+    ml.className = 'dlog-line';
+    ml.innerHTML = `<span class="dlog-ts">[${ts}]</span><span class="dlog-tag dt-mutate">MUTATE</span> ${d.mutations_preblocked} variants pre-blocked for ${d.threat_type||'attack'}`;
+    log.insertBefore(ml, log.firstChild);
+  }
+  const el = document.createElement('div');
+  el.className = 'dlog-line';
+  el.innerHTML = `<span class="dlog-ts">[${ts}]</span><span class="dlog-tag ${cls}">${tag}</span> ${msg}`;
+  log.insertBefore(el, log.firstChild);
+  while(log.children.length > 80) log.removeChild(log.lastChild);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// THREAT LEVEL BAR
+// ═════════════════════════════════════════════════════════════════════
+function updateThreatLevel(stats) {
+  const total = stats.total || 0;
+  const blocked = stats.blocked || 0;
+  const ratio = total > 0 ? blocked / total : 0;
+  const evo = stats.evolution || {};
+  const avg = evo.current_avg || 0;
+  let level, pct, color;
+  if(ratio > 0.7 || avg > 7) { level='CRITICAL'; pct=95; color='var(--red)'; }
+  else if(ratio > 0.4 || avg > 5) { level='HIGH'; pct=75; color='var(--red)'; }
+  else if(ratio > 0.2 || avg > 3) { level='MEDIUM'; pct=50; color='var(--amber)'; }
+  else if(total > 5) { level='LOW'; pct=25; color='var(--green)'; }
+  else { level='MINIMAL'; pct=5; color='var(--green)'; }
+  setEl('tl-current', level, color);
+  const fill = document.getElementById('tl-fill');
+  if(fill) { fill.style.width = pct+'%'; fill.style.background = color; }
+  if(level==='CRITICAL' && fill) fill.style.animation = 'tl-flash .6s ease-in-out infinite';
+  else if(fill) fill.style.animation = 'none';
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// SOPHISTICATION SPARKLINE
+// ═════════════════════════════════════════════════════════════════════
+function updateSparkline(stats) {
+  const evo = stats.evolution || {};
+  const avg = evo.current_avg || 0;
+  const trend = evo.trend || 'STABLE';
+  const data = stats.sparkline_data || [];
+  const color = avg <= 3 ? 'var(--green)' : avg <= 6 ? 'var(--amber)' : 'var(--red)';
+  const arrowMap = {ESCALATING:'↑',RISING:'↗',DECLINING:'↓',STABLE:'→'};
+  setEl('spark-avg', avg.toFixed(1), color);
+  setEl('spark-arrow', arrowMap[trend]||'→', trend==='ESCALATING'||trend==='RISING'?'var(--red)':trend==='DECLINING'?'var(--green)':'var(--muted)');
+  const statusMap = {
+    ESCALATING: '⚠️ ESCALATING — Attacks getting smarter',
+    RISING: '↗ Rising — Monitor closely',
+    DECLINING: '↓ Declining — Threat subsiding',
+    STABLE: '→ Stable — No escalation'
+  };
+  const statusEl = document.getElementById('spark-status');
+  if(statusEl) { statusEl.textContent = statusMap[trend]||statusMap.STABLE; statusEl.style.color = trend==='ESCALATING'?'var(--red)':trend==='RISING'?'var(--amber)':'var(--green)'; }
+  // SVG sparkline
+  if(data.length > 1) {
+    const svg = document.getElementById('sparkline');
+    const line = document.getElementById('spark-line');
+    if(!svg||!line) return;
+    const w=120, h=32, pad=2;
+    const max = Math.max(...data, 1);
+    const pts = data.map((v,i) => {
+      const x = pad + (i/(data.length-1))*(w-2*pad);
+      const y = h - pad - (v/max)*(h-2*pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    line.setAttribute('points', pts);
+    line.setAttribute('stroke', color);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// CLUSTER MAP (Physics Canvas)
+// ═════════════════════════════════════════════════════════════════════
+let clusterDots = [];
+function updateClusterMap(stats) {
+  const clusterData = stats.clusters || {};
+  const clusters = clusterData.clusters || [];
+  if(!clusters.length) return;
+  const cvs = document.getElementById('cluster-canvas');
+  if(!cvs) return;
+  cvs.width = cvs.clientWidth; cvs.height = 120;
+  // Generate dots if changed
+  if(clusterDots.length !== clusters.reduce((s,c)=>s+c.size,0)) {
+    clusterDots = [];
+    const colors = ['#00e5ff','#d500f9','#ff1744','#ffab00','#00e676','#2979ff','#ff6d00'];
+    clusters.forEach((c, ci) => {
+      const cx = (ci+1)/(clusters.length+1) * cvs.width;
+      const cy = cvs.height/2;
+      for(let i=0; i<Math.min(c.size,15); i++) {
+        clusterDots.push({
+          x: cx + (Math.random()-0.5)*80,
+          y: cy + (Math.random()-0.5)*60,
+          tx: cx, ty: cy,
+          vx: (Math.random()-0.5)*0.3, vy: (Math.random()-0.5)*0.3,
+          r: 2 + Math.random()*2,
+          color: colors[ci % colors.length],
+          label: c.dominant_type
+        });
+      }
+    });
+  }
+}
+
+function drawClusterMap() {
+  const cvs = document.getElementById('cluster-canvas');
+  if(!cvs || !clusterDots.length) { requestAnimationFrame(drawClusterMap); return; }
+  const ctx = cvs.getContext('2d');
+  if(!ctx) { requestAnimationFrame(drawClusterMap); return; }
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  clusterDots.forEach(d => {
+    // Spring toward center
+    d.vx += (d.tx - d.x) * 0.002;
+    d.vy += (d.ty - d.y) * 0.002;
+    // Repel from others (simple)
+    d.vx *= 0.98; d.vy *= 0.98;
+    d.x += d.vx; d.y += d.vy;
+    // Bounds
+    d.x = Math.max(d.r, Math.min(cvs.width-d.r, d.x));
+    d.y = Math.max(d.r, Math.min(cvs.height-d.r, d.y));
+    // Draw
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+    ctx.fillStyle = d.color + 'aa'; ctx.fill();
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r+4, 0, Math.PI*2);
+    ctx.fillStyle = d.color + '15'; ctx.fill();
+  });
+  requestAnimationFrame(drawClusterMap);
+}
+
+// ═════════════════════════════════════════════════════════════════════
 // BOOT
 // ═════════════════════════════════════════════════════════════════════
 initNeuralCanvas();
@@ -957,6 +1169,7 @@ connectWS();
 checkHealth();
 pollStats();
 pollXAI();
+drawClusterMap();
 setInterval(pollStats, 3500);
 setInterval(checkHealth, 6000);
 setInterval(pollXAI, 4000);
