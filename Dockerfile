@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system deps
+# Install system deps for ML packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ && rm -rf /var/lib/apt/lists/*
 
@@ -16,8 +16,8 @@ COPY . .
 # Set working directory to backend
 WORKDIR /app/argus/backend
 
-# Expose port
-EXPOSE 8000
+# Railway sets PORT env var dynamically
+ENV PORT=8000
 
-# Start uvicorn
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start uvicorn — use shell form so $PORT gets expanded
+CMD python -m uvicorn main:app --host 0.0.0.0 --port $PORT
