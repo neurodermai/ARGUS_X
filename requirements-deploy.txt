@@ -1,6 +1,6 @@
-# ARGUS-X Backend — Slim Deployment Dependencies
-# Excludes heavy ML packages (torch, sentence-transformers) to stay under 4GB
-# System runs in RULE-ONLY mode without ML — still fully functional
+# ARGUS-X Backend — Production Deployment Dependencies
+# Includes ONNX ML inference (no PyTorch) — enables ML classifier in production
+# Excludes sentence-transformers (pulls PyTorch ~1.5GB) — those features have fallbacks
 
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
@@ -22,6 +22,13 @@ python-multipart>=0.0.6
 # Session persistence
 redis>=5.0.0
 
-# Lightweight ML (no torch dependency)
+# ML / ONNX inference (no PyTorch dependency)
+onnxruntime>=1.20.0
+transformers>=4.36.0
+tokenizers>=0.15.0
 numpy>=1.26.0
 scikit-learn>=1.3.0
+huggingface-hub>=0.20.0
+
+# Monitoring
+sentry-sdk[fastapi]>=1.39.0
