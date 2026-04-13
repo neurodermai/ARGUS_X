@@ -44,7 +44,7 @@ from agents.red_team_agent import RedTeamAgent
 from agents.blue_agent import BlueAgent
 from agents.battle_engine import BattleEngine
 from agents.threat_correlator import ThreatCorrelator
-from routers import chat, redteam, analytics, agents, knowledge
+from routers import chat, redteam, analytics, agents, knowledge, battle, xai
 
 # Optional Sentry
 try:
@@ -145,6 +145,8 @@ app.include_router(redteam.router, prefix="/api/v1", tags=["redteam"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
 app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
 app.include_router(knowledge.router, prefix="/api/v1", tags=["knowledge"])
+app.include_router(battle.router, prefix="/api/v1", tags=["battle"])
+app.include_router(xai.router, prefix="/api/v1", tags=["xai"])
 
 
 # ─── WebSocket Live Feed ───────────────────────────────────────────────────────
