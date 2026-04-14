@@ -39,6 +39,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., max_length=10000, description="User message (max 10000 chars)")
     user_id: str = "anonymous"
     session_id: str = ""
+    org_id: str = Field(default="default", max_length=64, description="Organization ID for multi-tenant isolation")
     context: list = Field(default=[], max_length=10, description="Conversation context (max 10 items)")
 
 
@@ -62,7 +63,7 @@ class ChatResponse(BaseModel):
 def _build_event(user_id, session_id, message, action, threat_type,
                  score, layer, latency, method, sophistication=0,
                  fingerprint=None, mutations=0, explanation=None,
-                 session_threat_level="LOW"):
+                 session_threat_level="LOW", org_id="default"):
     # SECURITY: Never expose raw attack payloads in event previews.
     # CLEAN events are safe to preview (benign input); threats are redacted.
     if action in ("BLOCKED", "SANITIZED"):
@@ -75,6 +76,7 @@ def _build_event(user_id, session_id, message, action, threat_type,
         "ts":                    datetime.utcnow().isoformat() + "Z",
         "user_id":               user_id,
         "session_id":            session_id,
+        "org_id":                org_id,
         "preview":               preview,
         "action":                action,
         "threat_type":           threat_type,

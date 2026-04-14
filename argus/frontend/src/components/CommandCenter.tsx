@@ -25,6 +25,8 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { AttackTimeline } from './AttackTimeline';
 import { PatchBanner } from './PatchBanner';
 import { BypassHistory } from './BypassHistory';
+import { FingerprintCard } from './FingerprintCard';
+import { ComplianceExport } from './ComplianceExport';
 
 export default function CommandCenter() {
   // ── Data hooks ─────────────────────────────────────────────────────
@@ -238,7 +240,10 @@ export default function CommandCenter() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}>
               {attacks.slice(0, 8).filter((a) => a.blocked).map((a) => (
-                <XAICard key={a.id} attack={a} />
+                <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <XAICard attack={a} />
+                  <FingerprintCard attack={a} />
+                </div>
               ))}
             </div>
           </div>
@@ -316,6 +321,11 @@ export default function CommandCenter() {
             {/* Self-healing history */}
             <ErrorBoundary label="BYPASS HISTORY">
               <BypassHistory />
+            </ErrorBoundary>
+
+            {/* Compliance export */}
+            <ErrorBoundary label="COMPLIANCE EXPORT">
+              <ComplianceExport />
             </ErrorBoundary>
           </div>
         </div>
