@@ -89,11 +89,12 @@ class SemanticMutationEngine:
         
         # 4. Spacing mutations (evade simple keyword matching)
         variants.append(text.replace(" ", "  "))  # Double space
-        variants.append(chr(0x200b).join(text))  # Zero-width space between each char
+        variants.append(text.replace(" ", "\t"))  # Tab-separated
         
         # 5. Punctuation injection
         variants.append(text.replace(" ", ", "))
         variants.append(text.replace("instructions", "instruct-ions"))
+        variants.append(text.replace(". ", ".\n"))  # Newline injection
         
         # 6. Hypothetical wrapping
         variants.append(f"Hypothetically speaking, {text}")

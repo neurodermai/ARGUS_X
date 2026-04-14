@@ -42,7 +42,26 @@ print('Model + tokenizer baked into image.'); \
         echo "No HF_MODEL_REPO set — skipping model download (rule-only mode)"; \
     fi
 
-# ── Stage 3: Runner (lean runtime image, non-root) ───────────────────────────
+# ── Stage 3: Frontend Builder (compile React/Vite app) ──────────────────────
+# Builds the frontend to static /dist files. The Python backend serves these.
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /frontend
+
+# Install dependencies first (layer caching)
+COPY argus/frontend/package.json argus/frontend/package-lock.json ./
+RUN npm ci --ignore-scripts
+
+# Copy source and build
+COPY argus/frontend/ ./
+
+# Set production API URL (backend on same origin in Docker)
+ENV VITE_API_URL=""
+ENV VITE_WS_URL=""
+
+RUN npm run build
+
+# ── Stage 4: Runner (lean runtime image, non-root) ───────────────────────────
 FROM python:3.11-slim AS runner
 
 # SECURITY: Create non-root user before copying anything
@@ -59,6 +78,9 @@ COPY --from=model-fetcher /models /app/argus/backend/models
 # Copy project
 COPY --chown=argus:argus . .
 
+# Copy built frontend dist into the expected location
+COPY --from=frontend-builder --chown=argus:argus /frontend/dist /app/argus/frontend/dist
+
 # Set working directory to backend
 WORKDIR /app/argus/backend
 
@@ -72,3 +94,4 @@ USER argus
 
 # Start
 CMD python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+

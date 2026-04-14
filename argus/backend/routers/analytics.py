@@ -46,6 +46,7 @@ async def get_stats(request: Request):
         "defense_rate": defense_rate,
         "protect_pct": protect_pct,
         "mutations_preblocked": mutations_total + app.state.firewall.get_dynamic_rules_count(),
+        "bypasses_found": stats.get("bypasses_found", 0),
         
         # Nested details
         "stats": stats,

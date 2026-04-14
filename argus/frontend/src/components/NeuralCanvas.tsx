@@ -256,6 +256,10 @@ export const NeuralCanvas = memo(function NeuralCanvas({ attacks }: NeuralCanvas
       color: THREAT_COLORS[atk.type] || '#ff1744',
       blocked: atk.blocked,
     });
+    // Cap arrays to prevent memory growth on rapid events
+    if (s.particles.length > 50) s.particles.splice(0, s.particles.length - 50);
+    if (s.rings.length > 30) s.rings.splice(0, s.rings.length - 30);
+    if (s.pulses.length > 30) s.pulses.splice(0, s.pulses.length - 30);
   }, [attacks]);
 
   return (

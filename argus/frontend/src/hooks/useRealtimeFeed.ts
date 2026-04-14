@@ -30,8 +30,8 @@ export function useRealtimeFeed(): RealtimeFeedState {
   const [attacks, setAttacks] = useState<AttackEvent[]>([]);
   const [defenseLog, setDefenseLog] = useState<LogEntry[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [sophHistory, setSophHistory] = useState<number[]>([1, 2, 1, 3, 2, 4, 3, 4, 5, 4]);
-  const [latHistory, setLatHistory] = useState<number[]>([28, 35, 22, 41, 30, 26, 38, 44, 29, 33]);
+  const [sophHistory, setSophHistory] = useState<number[]>([]);
+  const [latHistory, setLatHistory] = useState<number[]>([]);
   const [campaignWsAlert, setCampaignWsAlert] = useState<CampaignWsAlert | null>(null);
   const [connected, setConnected] = useState(false);
 
@@ -44,19 +44,20 @@ export function useRealtimeFeed(): RealtimeFeedState {
 
     function connect() {
       try {
-        // Pass API key as token query param (mirrors REST X-API-Key auth)
-        const apiKey = typeof window !== 'undefined'
-          ? localStorage.getItem('ARGUS_API_KEY') || ''
-          : '';
-        const wsUrl = apiKey
-          ? `${WS_URL}/ws/live?token=${encodeURIComponent(apiKey)}`
-          : `${WS_URL}/ws/live`;
-        ws = new WebSocket(wsUrl);
+        // SECURITY: No token in URL — auth is sent after connection
+        ws = new WebSocket(`${WS_URL}/ws/live`);
       } catch {
         return;
       }
 
       ws.onopen = () => {
+        // Send auth message as first frame (auth-after-connect protocol)
+        const apiKey = typeof window !== 'undefined'
+          ? localStorage.getItem('ARGUS_API_KEY') || ''
+          : '';
+        if (apiKey) {
+          ws!.send(JSON.stringify({ type: 'auth', token: apiKey }));
+        }
         retries = 0;
         setConnected(true);
       };
@@ -131,8 +132,13 @@ export function useRealtimeFeed(): RealtimeFeedState {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setConnected(false);
+        // 4003 = auth failure — don't retry with same credentials
+        if (event.code === 4003) {
+          console.error('ARGUS WS: Authentication failed (4003)');
+          return;
+        }
         retries++;
         const delay = Math.min(1000 * Math.pow(2, retries), 15000);
         reconnectTimer = setTimeout(connect, delay);

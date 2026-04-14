@@ -76,8 +76,8 @@ export function useStats(): StatsState {
           total: data.total || 0,
           blocked: data.blocked || 0,
           muts: data.mutations_preblocked || 0,
-          bypasses: data.sanitized || 0,
-          patched: data.sanitized || 0,
+          bypasses: data.stats?.bypasses_found || data.bypasses_found || 0,
+          patched: data.blue_agent?.auto_patches || data.stats?.bypasses_found || 0,
         });
 
         if (data.battle) {

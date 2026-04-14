@@ -19,12 +19,11 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -138,12 +137,27 @@ async def lifespan(app: FastAPI):
     # Layer 7: XAI Engine
     app.state.xai = XAIEngine()
 
-    # WebSocket clients
-    app.state.ws_clients: List[WebSocket] = []
+    # WebSocket clients — set + lock for safe concurrent access
+    app.state.ws_clients: set[WebSocket] = set()
+    app.state.ws_lock = asyncio.Lock()
 
     # Session threat tracking (Redis-backed, persistent)
     app.state.session_store = SessionStore()
     await app.state.session_store.init()
+
+    # Load persisted dynamic rules from DB into firewall memory
+    try:
+        db_rules = await app.state.db.get_dynamic_rules()
+        for rule in db_rules:
+            app.state.firewall.add_dynamic_rule(
+                rule.get("pattern", ""),
+                rule.get("threat_type", "UNKNOWN"),
+                rule.get("severity", 0.85) if "severity" in rule else 0.85,
+            )
+        if db_rules:
+            log.info(f"📦 Loaded {len(db_rules)} dynamic rules from DB")
+    except Exception as e:
+        log.warning(f"Dynamic rules load failed (non-fatal): {e}")
 
     # Broadcast helper (must be set inside lifespan after state exists)
     app.state.broadcast = _broadcast
@@ -227,19 +241,47 @@ app.include_router(compliance.router, prefix="/api/v1", tags=["compliance"], dep
 
 
 # ─── WebSocket Live Feed ───────────────────────────────────────────────────────
-@app.websocket("/ws/live")
-async def ws_live_feed(ws: WebSocket, token: str = Query(default="")):
-    # ── SECURITY: Authenticate BEFORE accepting the connection ─────────
-    # Mirrors REST API auth: if API_KEY is configured, token must match.
-    # If API_KEY is not set (dev/demo mode), access is open.
-    _expected = os.getenv("API_KEY", "")
-    if _expected and token != _expected:
-        log.warning("🔒 WebSocket rejected — invalid or missing token")
-        await ws.close(code=4003)
-        return
+# SECURITY: Auth-after-connect protocol.
+# 1. Accept the connection (required by WebSocket spec to send close frames)
+# 2. Wait for {"type": "auth", "token": "..."} within AUTH_TIMEOUT seconds
+# 3. Block all other messages until authenticated
+# 4. Close with 4003 if auth fails or times out
+WS_AUTH_TIMEOUT = 10  # seconds
+MAX_WS_CLIENTS = 100
 
+
+@app.websocket("/ws/live")
+async def ws_live_feed(ws: WebSocket):
     await ws.accept()
-    app.state.ws_clients.append(ws)
+
+    # ── SECURITY: Auth-after-connect ──────────────────────────────────
+    _expected = os.getenv("API_KEY", "")
+    if _expected:
+        try:
+            # Wait for auth message within timeout
+            raw = await asyncio.wait_for(ws.receive_text(), timeout=WS_AUTH_TIMEOUT)
+            msg = json.loads(raw)
+            if msg.get("type") != "auth" or msg.get("token") != _expected:
+                log.warning("🔒 WebSocket rejected — invalid auth")
+                await ws.close(code=4003)
+                return
+        except asyncio.TimeoutError:
+            log.warning("🔒 WebSocket rejected — auth timeout")
+            await ws.close(code=4003)
+            return
+        except Exception:
+            log.warning("🔒 WebSocket rejected — malformed auth")
+            await ws.close(code=4003)
+            return
+
+    # ── Enforce connection cap ────────────────────────────────────────
+    async with app.state.ws_lock:
+        if len(app.state.ws_clients) >= MAX_WS_CLIENTS:
+            log.warning("🔒 WebSocket rejected — connection limit reached")
+            await ws.close(code=4008)
+            return
+        app.state.ws_clients.add(ws)
+
     log.info(f"Dashboard connected (authenticated). Total: {len(app.state.ws_clients)}")
 
     # Send last 30 events on connect
@@ -252,24 +294,37 @@ async def ws_live_feed(ws: WebSocket, token: str = Query(default="")):
 
     try:
         while True:
-            await asyncio.sleep(15)
-            await ws.send_text(json.dumps({"type": "ping", "ts": datetime.utcnow().isoformat()}))
-    except WebSocketDisconnect:
-        if ws in app.state.ws_clients:
-            app.state.ws_clients.remove(ws)
+            # Listen for client messages (or detect disconnect)
+            # The receive_text() call also serves as a keepalive detector
+            try:
+                data = await asyncio.wait_for(ws.receive_text(), timeout=30)
+                # Client can send pong or other messages — ignore
+            except asyncio.TimeoutError:
+                # No message from client in 30s — send ping
+                await ws.send_text(json.dumps({"type": "ping", "ts": datetime.utcnow().isoformat()}))
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        async with app.state.ws_lock:
+            app.state.ws_clients.discard(ws)
 
 
 # ─── Broadcast helper ─────────────────────────────────────────────────
 async def _broadcast(app_instance, event_type: str, data: dict):
+    payload = json.dumps({"type": event_type, "data": data}, default=str)
+    # Snapshot the set under lock to avoid mutation during iteration
+    async with app_instance.state.ws_lock:
+        clients = set(app_instance.state.ws_clients)
     dead = []
-    for ws in app_instance.state.ws_clients:
+    for ws in clients:
         try:
-            await ws.send_text(json.dumps({"type": event_type, "data": data}, default=str))
+            await ws.send_text(payload)
         except Exception:
             dead.append(ws)
-    for ws in dead:
-        if ws in app_instance.state.ws_clients:
-            app_instance.state.ws_clients.remove(ws)
+    if dead:
+        async with app_instance.state.ws_lock:
+            for ws in dead:
+                app_instance.state.ws_clients.discard(ws)
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────
@@ -309,12 +364,28 @@ async def global_error(req: Request, exc: Exception):
 
 
 # ─── Frontend Serving ────────────────────────────────────────────────
+# Priority: built /dist (production) → raw source (dev fallback)
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
-if FRONTEND_DIR.exists():
-    @app.get("/")
-    async def serve_frontend():
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+_STATIC_DIR = FRONTEND_DIST if FRONTEND_DIST.exists() else FRONTEND_DIR
+
+if _STATIC_DIR.exists():
+    # Serve static assets first (JS, CSS, images)
+    _assets_dir = _STATIC_DIR / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+    # SPA fallback: serve index.html for all non-API routes
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str):
+        # Don't intercept API or health routes
+        if path.startswith("api/") or path == "health" or path.startswith("ws/"):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        index = _STATIC_DIR / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
+        return JSONResponse(status_code=404, content={"detail": "Frontend not built"})
 
 
 if __name__ == "__main__":

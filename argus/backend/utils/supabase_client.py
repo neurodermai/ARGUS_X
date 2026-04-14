@@ -317,16 +317,16 @@ class SupabaseClient:
     # ── Dynamic Rules ─────────────────────────────────────────────────────────
 
     async def add_dynamic_rule(self, pattern: str, threat_type: str, source: str = "MUTATION_ENGINE"):
-        """Add a dynamic firewall rule."""
+        """Add a dynamic firewall rule. Deduplicates by pattern via UPSERT."""
         try:
             if self.available:
                 await self._run_sync(
-                    lambda: self._write_client.table("dynamic_rules").insert({
+                    lambda: self._write_client.table("dynamic_rules").upsert({
                         "pattern": pattern[:500],
                         "threat_type": threat_type,
                         "source": source,
                         "active": True,
-                    }).execute()
+                    }, on_conflict="pattern").execute()
                 )
         except Exception as e:
             log.warning(f"Dynamic rule add failed: {e}")

@@ -105,6 +105,13 @@ class ThreatCorrelator:
             if len(self.threat_window) > 2000:
                 self.threat_window = self.threat_window[-1000:]
 
+            # Cap fingerprint tracking to prevent memory growth
+            if len(self.fingerprint_counts) > 10000:
+                # Evict least-frequent fingerprints
+                sorted_fps = sorted(self.fingerprint_counts.items(), key=lambda x: x[1])
+                for fp_key, _ in sorted_fps[:5000]:
+                    del self.fingerprint_counts[fp_key]
+
     async def _analyze_patterns(self):
         """Core correlation logic — runs every 30 seconds."""
         now = datetime.utcnow()
@@ -153,6 +160,9 @@ class ThreatCorrelator:
                                if c["threat_type"] == threat_type and c["status"] == "ACTIVE"]
                     if not existing:
                         self.active_campaigns.append(campaign)
+                        # Cap active campaigns to prevent memory growth
+                        if len(self.active_campaigns) > 100:
+                            self.active_campaigns = self.active_campaigns[-50:]
                         await self.db.log_campaign(campaign)
                         log.warning(f"⚠️  CAMPAIGN DETECTED: {threat_type} | {unique_users} users | {len(events)} events")
 

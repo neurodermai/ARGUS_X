@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., max_length=10000, description="User message (max 10000 chars)")
     user_id: str = "anonymous"
     session_id: str = ""
-    org_id: str = Field(default="default", max_length=64, description="Organization ID for multi-tenant isolation")
+    # SECURITY: org_id is derived server-side, never from client input.
     context: list = Field(default=[], max_length=10, description="Conversation context (max 10 items)")
 
 
@@ -63,7 +63,9 @@ class ChatResponse(BaseModel):
 def _build_event(user_id, session_id, message, action, threat_type,
                  score, layer, latency, method, sophistication=0,
                  fingerprint=None, mutations=0, explanation=None,
-                 session_threat_level="LOW", org_id="default"):
+                 session_threat_level="LOW"):
+    # SECURITY: org_id is always server-derived, never from client.
+    org_id = "default"
     # SECURITY: Never expose raw attack payloads in event previews.
     # CLEAN events are safe to preview (benign input); threats are redacted.
     if action in ("BLOCKED", "SANITIZED"):
@@ -121,7 +123,6 @@ async def chat(req: ChatRequest, request: Request):
         ev = _build_event(
             req.user_id, sid, req.message, "DEMO_BYPASS",
             None, 0, "NONE", elapsed, "DEMO_BYPASS",
-            org_id=req.org_id
         )
         await app.state.db.log_event(ev)
         return ChatResponse(
@@ -170,7 +171,7 @@ async def chat(req: ChatRequest, request: Request):
             req.user_id, sid, req.message, "BLOCKED",
             fw["threat_type"], fw["score"], "INPUT", elapsed,
             fw.get("method", ""), sophistication, fingerprint, mutations,
-            explanation, session_level, org_id=req.org_id
+            explanation, session_level
         )
 
         # ── LAYER 1: DATABASE + REALTIME ─────────────────────────────────
@@ -222,7 +223,7 @@ async def chat(req: ChatRequest, request: Request):
             req.user_id, sid, req.message, "SANITIZED",
             audit["flag_reason"], audit["confidence"], "OUTPUT",
             elapsed, "OUTPUT_AUDITOR", explanation=xai.get("primary_reason", audit.get("explanation")),
-            session_threat_level=session_level, org_id=req.org_id
+            session_threat_level=session_level
         )
         await app.state.db.log_event(ev)
         await app.state.db.increment_stat("sanitized")
@@ -254,7 +255,7 @@ async def chat(req: ChatRequest, request: Request):
     ev = _build_event(
         req.user_id, sid, req.message, "CLEAN",
         None, fw["score"], "NONE", elapsed, fw.get("method", ""),
-        session_threat_level=session_level, org_id=req.org_id
+        session_threat_level=session_level
     )
     await app.state.db.log_event(ev)
     await app.state.db.increment_stat("clean")

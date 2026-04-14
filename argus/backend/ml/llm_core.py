@@ -45,7 +45,7 @@ class LLMCore:
     """
 
     def __init__(self):
-        self.model = os.getenv("LLM_MODEL", "claude-3-haiku-20240307")
+        self.model = os.getenv("LLM_MODEL", "claude-3-5-haiku-20241022")
         self.mock_mode = False
         
         # Check if we have any API key configured
@@ -56,6 +56,13 @@ class LLMCore:
             self.mock_mode = True
             log.info("✅ LLM Core initialized (MOCK mode — no API keys)")
         else:
+            # Validate model string on startup
+            _deprecated = {"claude-3-haiku-20240307", "claude-3-sonnet-20240229"}
+            if self.model in _deprecated:
+                log.warning(
+                    f"⚠️ LLM model '{self.model}' is DEPRECATED. "
+                    f"Update LLM_MODEL env var to 'claude-3-5-haiku-20241022' or newer."
+                )
             log.info(f"✅ LLM Core initialized (model: {self.model})")
 
     async def generate(self, message: str, context: list = None, system: str = None) -> str:
