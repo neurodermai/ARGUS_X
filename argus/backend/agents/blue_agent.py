@@ -18,10 +18,11 @@ class BlueAgent:
     4. Reports defense metrics
     """
 
-    def __init__(self, firewall, mutator, fingerprinter):
+    def __init__(self, firewall, mutator, fingerprinter, db=None):
         self.firewall = firewall
         self.mutator = mutator
         self.fingerprinter = fingerprinter
+        self.db = db
         self.blocks = 0
         self.bypasses = 0
         self.auto_patches = 0
@@ -62,6 +63,9 @@ class BlueAgent:
             # Auto-patch: add bypassed attack to dynamic rules
             self.firewall.add_dynamic_rule(attack_text, threat_type)
             self.auto_patches += 1
+            # Persist to DB so the rule survives restarts
+            if self.db:
+                await self.db.add_dynamic_rule(attack_text, threat_type, source="BLUE_AGENT_PATCH")
             result["auto_patched"] = True
             
             log.warning(f"🔧 Blue Agent auto-patched bypass: {threat_type}")

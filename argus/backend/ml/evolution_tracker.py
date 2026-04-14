@@ -100,6 +100,7 @@ class EvolutionTracker:
         return {
             "current_avg": round(current_avg, 2),
             "trend": trend,
+            "threat_level": min(5, max(1, round(current_avg / 2))) if current_avg > 0 else 1,
             "is_escalating": is_escalating,
             "escalation_count": self.escalation_count,
             "window_size": self.window_size,

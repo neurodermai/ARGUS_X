@@ -94,7 +94,6 @@ export const AttackTimeline = memo(function AttackTimeline({
         if (v > maxVal) maxVal = v;
       }
     }
-    // Round up to nice number for gridlines
     maxVal = Math.ceil(maxVal * 1.15);
 
     const padLeft = 28;
@@ -143,8 +142,8 @@ export const AttackTimeline = memo(function AttackTimeline({
       let started = false;
       for (let i = 0; i < buf.length; i++) {
         const snap = buf[i];
-        const age = (now - snap.ts) / 1000; // seconds ago
-        if (age > 300) continue; // outside 5-min window
+        const age = (now - snap.ts) / 1000;
+        if (age > 300) continue;
         const x = padLeft + plotW - (age / 300) * plotW;
         const val = snap.data[type] || 0;
         const y = padTop + plotH - (val / maxVal) * plotH;
@@ -163,13 +162,12 @@ export const AttackTimeline = memo(function AttackTimeline({
       ctx.stroke();
     }
 
-    // Legend (bottom-right, compact)
+    // Legend (top-right, compact)
     if (types.length > 0) {
       const legendY = padTop + 2;
       let legendX = w - padRight - 4;
       ctx.font = `7px ${fonts.mono}`;
       ctx.textAlign = 'right';
-      // Show up to 4 types in legend (reverse so most recent types are shown)
       const legendTypes = types.slice(0, 4);
       for (let i = legendTypes.length - 1; i >= 0; i--) {
         const t = legendTypes[i];
@@ -184,15 +182,11 @@ export const AttackTimeline = memo(function AttackTimeline({
   }, [velocity, height]);
 
   return (
-    <div ref={containerRef} style={{ width: '100%' }}>
+    <div ref={containerRef} className="w-full">
       <canvas
         ref={canvasRef}
-        style={{
-          display: 'block',
-          width: '100%',
-          height,
-          borderRadius: 4,
-        }}
+        className="block w-full rounded"
+        style={{ height }}
       />
     </div>
   );

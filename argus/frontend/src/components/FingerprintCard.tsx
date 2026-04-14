@@ -1,5 +1,4 @@
 import { memo, useMemo } from 'react';
-import { fonts } from '../theme';
 import { THREAT_COLORS } from '../constants';
 import type { AttackEvent } from '../types';
 
@@ -31,7 +30,6 @@ function FingerprintCardInner({ attack }: FingerprintCardProps) {
       MULTI_TURN: 'A9',
     };
     const prefix = taxonomy[attack.type] || 'AX';
-    // Use attack id + type to generate a stable hex suffix
     const hash = (attack.id * 2654435761 >>> 0).toString(16).toUpperCase().padStart(4, '0');
     return `${prefix}-${hash}`;
   }, [attack.id, attack.type]);
@@ -40,64 +38,34 @@ function FingerprintCardInner({ attack }: FingerprintCardProps) {
   const triggeredSignals = useMemo(() => {
     const active = new Set<number>();
     const soph = attack.soph;
-    // Lower signals trigger for lower soph, higher for higher
     for (let i = 0; i < SIGNAL_NAMES.length; i++) {
       const threshold = Math.ceil((i + 1) / 2);
-      // Deterministic pseudo-random seeded from attack.id + signal index
       const seed = ((attack.id * 2654435761 + i * 340573) >>> 0) % 100;
       if (soph >= threshold && seed > 30) {
         active.add(i);
       }
     }
-    // Ensure at least one is active for blocked attacks
     if (attack.blocked && active.size === 0) active.add(0);
     return active;
   }, [attack.id, attack.soph, attack.blocked]);
 
   return (
     <div
-      style={{
-        background: '#060b18',
-        border: `1px solid ${color}20`,
-        borderRadius: 6,
-        padding: '8px 10px',
-        animation: 'slideUp 0.3s cubic-bezier(.22,1,.36,1)',
-      }}
+      className="bg-[#060b18] rounded-md p-2 px-2.5 animate-slide-up"
+      style={{ border: `1px solid ${color}20` }}
     >
       {/* Fingerprint ID */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <div
-          style={{
-            fontFamily: fonts.mono,
-            fontSize: 10,
-            fontWeight: 700,
-            color,
-            letterSpacing: '0.05em',
-          }}
-        >
+      <div className="flex items-center gap-2 mb-1.5">
+        <div className="font-mono text-[10px] font-bold tracking-[0.05em]" style={{ color }}>
           🔬 {fingerprintId}
         </div>
-        <div
-          style={{
-            fontFamily: fonts.mono,
-            fontSize: 8,
-            color: '#3a5070',
-            marginLeft: 'auto',
-          }}
-        >
+        <div className="font-mono text-[8px] text-argus-muted ml-auto">
           SOPH {attack.soph}/10
         </div>
       </div>
 
       {/* Signal Heatmap Grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(11, 1fr)',
-          gap: 2,
-          marginBottom: 4,
-        }}
-      >
+      <div className="grid grid-cols-11 gap-0.5 mb-1">
         {SIGNAL_NAMES.map((name, i) => {
           const active = triggeredSignals.has(i);
           const intensity = active ? Math.min(0.3 + (attack.soph / 10) * 0.7, 1) : 0.05;
@@ -105,15 +73,12 @@ function FingerprintCardInner({ attack }: FingerprintCardProps) {
             <div
               key={name}
               title={name.replace(/_/g, ' ')}
+              className="w-full pt-[100%] rounded-sm transition-colors duration-300"
               style={{
-                width: '100%',
-                paddingTop: '100%',
-                borderRadius: 2,
                 background: active
                   ? `rgba(${attack.soph > 7 ? '255,23,68' : attack.soph > 4 ? '255,171,0' : '0,230,118'},${intensity})`
                   : 'rgba(255,255,255,0.03)',
                 border: active ? `1px solid ${color}40` : '1px solid transparent',
-                transition: 'background 0.3s ease',
               }}
             />
           );
@@ -121,7 +86,7 @@ function FingerprintCardInner({ attack }: FingerprintCardProps) {
       </div>
 
       {/* Signal labels */}
-      <div style={{ fontFamily: fonts.mono, fontSize: 7, color: '#2a4060', lineHeight: 1.4 }}>
+      <div className="font-mono text-[7px] text-argus-dim leading-snug">
         {Array.from(triggeredSignals)
           .slice(0, 3)
           .map((i) => SIGNAL_NAMES[i]?.replace(/_/g, ' '))

@@ -1,5 +1,4 @@
 import { useState, useCallback } from 'react';
-import { fonts } from '../theme';
 import { API_URL } from '../utils/config';
 import { getApiKey } from '../utils/apiKey';
 
@@ -108,31 +107,24 @@ ${xaiSamples.map((x: Record<string, unknown>) => `<tr>
   }, []);
 
   return (
-    <div style={{ background: '#080d1c', border: '1px solid #1a2845', borderRadius: 8, padding: '10px 12px' }}>
-      <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', letterSpacing: '0.15em', marginBottom: 7 }}>
+    <div className="bg-argus-panel border border-argus-border rounded-lg px-3 py-2.5">
+      <div className="font-mono text-[8px] text-argus-muted tracking-[0.15em] mb-[7px]">
         COMPLIANCE EXPORT
       </div>
       <button
         onClick={handleExport}
         disabled={loading}
+        className="w-full py-2 px-3 rounded-md font-mono text-[10px] font-bold tracking-[0.1em] transition-all duration-200 cursor-pointer disabled:cursor-default"
         style={{
-          width: '100%',
-          padding: '8px 12px',
           background: loading ? '#1a2845' : 'linear-gradient(135deg, #00e5ff22, #d500f922)',
           border: '1px solid #00e5ff30',
-          borderRadius: 6,
           color: loading ? '#3a5070' : '#00e5ff',
-          fontFamily: fonts.mono,
-          fontSize: 10,
-          fontWeight: 700,
-          cursor: loading ? 'default' : 'pointer',
-          letterSpacing: '0.1em',
-          transition: 'all 0.2s ease',
         }}
+        aria-label="Export compliance report"
       >
         {loading ? '⏳ GENERATING...' : '📄 EXPORT REPORT'}
       </button>
-      <div style={{ fontFamily: fonts.mono, fontSize: 7, color: '#2a4060', marginTop: 4 }}>
+      <div className="font-mono text-[7px] text-argus-dim mt-1">
         one-click PDF · real data · audit-ready
       </div>
     </div>

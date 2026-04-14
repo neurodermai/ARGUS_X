@@ -76,10 +76,11 @@ class XAIEngine:
         })
 
         # ── Layer: ML Classifier ──────────────────────────────────────────
-        ml_confidence = fw_result.get("score", 0) if fw_result.get("method") == "ONNX_ML_CLASSIFIER" else 0
+        _ml_methods = {"ONNX_ML_CLASSIFIER", "ONNX_DEBERTA_V3"}
+        ml_confidence = fw_result.get("score", 0) if fw_result.get("method") in _ml_methods else 0
         layer_decisions.append({
             "layer_name": "ML Classifier",
-            "triggered": fw_result.get("blocked", False) and fw_result.get("method") == "ONNX_ML_CLASSIFIER",
+            "triggered": fw_result.get("blocked", False) and fw_result.get("method") in _ml_methods,
             "confidence": round(ml_confidence * 100, 1),
             "signals": [fw_result.get("details", "")] if ml_confidence > 0.5 else [],
             "reasoning": self._ml_reasoning(fw_result),
@@ -138,7 +139,7 @@ class XAIEngine:
         return "No regex patterns triggered. Input passed static rule check."
 
     def _ml_reasoning(self, fw_result: dict) -> str:
-        if fw_result.get("method") == "ONNX_ML_CLASSIFIER":
+        if fw_result.get("method") in {"ONNX_ML_CLASSIFIER", "ONNX_DEBERTA_V3"}:
             score = fw_result.get("score", 0)
             if score > 0.87:
                 return f"Neural classifier detected injection with {score:.0%} confidence."

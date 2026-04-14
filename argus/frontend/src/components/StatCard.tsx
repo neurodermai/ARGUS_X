@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { fonts } from '../theme';
 import { Sparkline } from './Sparkline';
 
 interface StatCardProps {
@@ -13,44 +12,20 @@ interface StatCardProps {
 function StatCardInner({ label, value, color, sub, sparkData }: StatCardProps) {
   return (
     <div
-      style={{
-        background: '#080d1c',
-        border: '1px solid #1a2845',
-        borderTop: `2px solid ${color}`,
-        borderRadius: 8,
-        padding: '11px 14px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-      }}
+      className="bg-argus-panel border border-argus-border rounded-lg px-3.5 py-[11px] flex flex-col gap-1"
+      style={{ borderTop: `2px solid ${color}` }}
     >
-      <div
-        style={{
-          fontFamily: fonts.mono,
-          fontSize: 8,
-          letterSpacing: '0.18em',
-          color: '#3a5070',
-          textTransform: 'uppercase',
-        }}
-      >
+      <div className="font-mono text-[8px] tracking-[0.18em] text-argus-muted uppercase">
         {label}
       </div>
-      <div
-        style={{
-          fontFamily: fonts.display,
-          fontSize: 24,
-          fontWeight: 700,
-          color,
-          lineHeight: 1,
-        }}
-      >
+      <div className="font-display text-2xl font-bold leading-none" style={{ color }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontFamily: fonts.mono, fontSize: 9, color: '#3a5070' }}>{sub}</div>
+        <div className="font-mono text-[9px] text-argus-muted">{sub}</div>
       )}
       {sparkData && (
-        <div style={{ marginTop: 4 }}>
+        <div className="mt-1">
           <Sparkline data={sparkData} color={color} />
         </div>
       )}

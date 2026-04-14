@@ -83,22 +83,41 @@ class SessionStore:
     async def update_session(self, session_id: str, user_id: str, action: str, score: float):
         """Update session threat counters atomically."""
         if self._redis:
-            # Redis: use pipeline for atomic read-modify-write
             try:
                 key = self._key(session_id)
-                raw = await self._redis.get(key)
-                session = json.loads(raw) if raw else _DEFAULT_SESSION.copy()
+                # Use WATCH for optimistic locking — retry if key changes
+                # between read and write (prevents TOCTOU race under load).
+                max_retries = 3
+                for _attempt in range(max_retries):
+                    try:
+                        await self._redis.watch(key)
+                        raw = await self._redis.get(key)
+                        session = json.loads(raw) if raw else _DEFAULT_SESSION.copy()
 
-                if not session.get("user_id"):
-                    session["user_id"] = user_id
-                session["total"] += 1
-                if action in ("BLOCKED", "SANITIZED"):
-                    session["threats"] += 1
-                    if score > session["last_score"]:
-                        session["escalation"] += 1
-                session["last_score"] = score
+                        if not session.get("user_id"):
+                            session["user_id"] = user_id
+                        session["total"] += 1
+                        if action in ("BLOCKED", "SANITIZED"):
+                            session["threats"] += 1
+                            if score > session["last_score"]:
+                                session["escalation"] += 1
+                        session["last_score"] = score
 
-                await self._redis.set(key, json.dumps(session), ex=SESSION_TTL)
+                        pipe = self._redis.pipeline()
+                        pipe.multi()
+                        pipe.set(key, json.dumps(session), ex=SESSION_TTL)
+                        await pipe.execute()
+                        break  # Success
+                    except Exception as watch_err:
+                        err_name = type(watch_err).__name__
+                        if "WatchError" in err_name:
+                            continue  # Retry on contention
+                        raise
+                    finally:
+                        try:
+                            await self._redis.unwatch()
+                        except Exception:
+                            pass
             except Exception as e:
                 log.warning(f"Redis SET failed for {session_id}: {e}")
         else:

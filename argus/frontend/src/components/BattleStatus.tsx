@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { fonts } from '../theme';
 
 interface BattleStatusProps {
   redAtks: number;
@@ -13,58 +12,45 @@ const TIERS = ['NAIVE', 'BASIC', 'OBFUSCATED', 'ADVERSARIAL', 'APEX'];
 function BattleStatusInner({ redAtks, blueBlocks, redBypasses, tier }: BattleStatusProps) {
   const blockRate = redAtks > 0 ? Math.round((blueBlocks / redAtks) * 100) : 100;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div
-            style={{
-              width: 8, height: 8, borderRadius: '50%',
-              background: '#ff1744', animation: 'pulse 0.8s ease-in-out infinite',
-            }}
-          />
-          <span style={{ fontFamily: fonts.mono, fontSize: 9, color: '#ff1744' }}>
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-[7px]">
+          <div className="w-2 h-2 rounded-full bg-argus-red animate-pulse-fast" />
+          <span className="font-mono text-[9px] text-argus-red">
             RED AGENT · {TIERS[Math.min(tier - 1, 4)]}
           </span>
         </div>
-        <span style={{ fontFamily: fonts.mono, fontSize: 9, color: '#3a5070' }}>
+        <span className="font-mono text-[9px] text-argus-muted">
           {redAtks} attacks
         </span>
       </div>
-      <div style={{ height: 3, background: '#0d1830', borderRadius: 2 }}>
+      <div className="h-[3px] bg-argus-input rounded-sm">
         <div
-          style={{
-            height: '100%',
-            width: `${Math.min((redBypasses / Math.max(redAtks, 1)) * 100 * 5, 100)}%`,
-            background: '#ff1744', borderRadius: 2, transition: 'width 0.5s ease',
-          }}
+          className="h-full bg-argus-red rounded-sm transition-all duration-500"
+          style={{ width: `${Math.min((redBypasses / Math.max(redAtks, 1)) * 100 * 5, 100)}%` }}
         />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div
-            style={{
-              width: 8, height: 8, borderRadius: '50%',
-              background: '#00e5ff', animation: 'pulse 1.4s ease-in-out infinite',
-            }}
-          />
-          <span style={{ fontFamily: fonts.mono, fontSize: 9, color: '#00e5ff' }}>
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-[7px]">
+          <div className="w-2 h-2 rounded-full bg-argus-cyan animate-pulse-dot" />
+          <span className="font-mono text-[9px] text-argus-cyan">
             ARGUS-X DEFENSE
           </span>
         </div>
-        <span style={{ fontFamily: fonts.mono, fontSize: 9, color: '#00e676' }}>
+        <span className="font-mono text-[9px] text-argus-green">
           {blockRate}% block rate
         </span>
       </div>
-      <div style={{ height: 3, background: '#0d1830', borderRadius: 2 }}>
+      <div className="h-[3px] bg-argus-input rounded-sm">
         <div
+          className="h-full bg-argus-cyan rounded-sm transition-all duration-500"
           style={{
-            height: '100%', width: `${blockRate}%`,
-            background: '#00e5ff', borderRadius: 2, transition: 'width 0.5s ease',
+            width: `${blockRate}%`,
             boxShadow: '0 0 6px #00e5ff44',
           }}
         />
       </div>
-      <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#2a4060' }}>
+      <div className="font-mono text-[8px] text-argus-dim">
         {redBypasses} bypasses found · {redBypasses} auto-patched
       </div>
     </div>

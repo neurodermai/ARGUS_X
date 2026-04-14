@@ -153,6 +153,9 @@ class RedTeamAgent:
         # Add as dynamic rule with the identified threat type
         self.firewall.add_dynamic_rule(text, attack["type"])
 
+        # Persist to DB so the rule survives restarts
+        await self.db.add_dynamic_rule(text, attack["type"], source="RED_AGENT_PATCH")
+
         # Record patch event for dashboard visualization
         self.last_patch = {
             "before": text[:200],
