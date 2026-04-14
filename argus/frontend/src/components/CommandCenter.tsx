@@ -25,10 +25,12 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { AttackTimeline } from './AttackTimeline';
 import { PatchBanner } from './PatchBanner';
 import { BypassHistory } from './BypassHistory';
+import { FingerprintCard } from './FingerprintCard';
+import { ComplianceExport } from './ComplianceExport';
 
 export default function CommandCenter() {
   // ── Data hooks ─────────────────────────────────────────────────────
-  const { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert } = useRealtimeFeed();
+  const { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert, connected } = useRealtimeFeed();
   const {
     stats, tier, threatLevel, campaignCount, threatVelocity,
     lastPatch, showPatch,
@@ -96,7 +98,7 @@ export default function CommandCenter() {
           background: 'rgba(5,9,20,0.98)',
           borderBottom: '1px solid #1a2845',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 20px',
+          padding: '0 20px', gap: 12, flexWrap: 'wrap' as const,
         }}
       >
         {/* Logo */}
@@ -118,7 +120,7 @@ export default function CommandCenter() {
         </div>
 
         {/* Center stats */}
-        <div style={{ display: 'flex', gap: 20 }}>
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' as const }}>
           {[
             { label: 'BLOCKED', val: stats.blocked, color: '#ff1744' },
             { label: 'PRE-BLOCKED', val: stats.muts, color: '#d500f9' },
@@ -137,7 +139,9 @@ export default function CommandCenter() {
         {/* Status pills */}
         <div style={{ display: 'flex', gap: 8 }}>
           {[
-            { color: '#00e676', label: 'ARGUS ONLINE' },
+            connected
+              ? { color: '#00e676', label: 'ARGUS ONLINE', fast: false }
+              : { color: '#ffab00', label: 'RECONNECTING…', fast: true },
             { color: '#ff1744', label: 'RED AGENT LIVE', fast: true },
           ].map((p) => (
             <div
@@ -164,8 +168,8 @@ export default function CommandCenter() {
       <div
         style={{
           flex: 1, display: 'grid',
-          gridTemplateColumns: '240px 1fr 220px',
-          gridTemplateRows: '1fr 180px',
+          gridTemplateColumns: 'minmax(180px, 240px) 1fr minmax(180px, 220px)',
+          gridTemplateRows: '1fr minmax(140px, 180px)',
           gap: '1px', background: '#0d1628',
           overflow: 'hidden', minHeight: 0,
         }}
@@ -236,7 +240,10 @@ export default function CommandCenter() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}>
               {attacks.slice(0, 8).filter((a) => a.blocked).map((a) => (
-                <XAICard key={a.id} attack={a} />
+                <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <XAICard attack={a} />
+                  <FingerprintCard attack={a} />
+                </div>
               ))}
             </div>
           </div>
@@ -314,6 +321,11 @@ export default function CommandCenter() {
             {/* Self-healing history */}
             <ErrorBoundary label="BYPASS HISTORY">
               <BypassHistory />
+            </ErrorBoundary>
+
+            {/* Compliance export */}
+            <ErrorBoundary label="COMPLIANCE EXPORT">
+              <ComplianceExport />
             </ErrorBoundary>
           </div>
         </div>

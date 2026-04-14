@@ -23,6 +23,7 @@ interface RealtimeFeedState {
   sophHistory: number[];
   latHistory: number[];
   campaignWsAlert: CampaignWsAlert | null;
+  connected: boolean;
 }
 
 export function useRealtimeFeed(): RealtimeFeedState {
@@ -32,6 +33,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
   const [sophHistory, setSophHistory] = useState<number[]>([1, 2, 1, 3, 2, 4, 3, 4, 5, 4]);
   const [latHistory, setLatHistory] = useState<number[]>([28, 35, 22, 41, 30, 26, 38, 44, 29, 33]);
   const [campaignWsAlert, setCampaignWsAlert] = useState<CampaignWsAlert | null>(null);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -56,6 +58,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
 
       ws.onopen = () => {
         retries = 0;
+        setConnected(true);
       };
 
       ws.onmessage = (e: MessageEvent) => {
@@ -129,6 +132,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
       };
 
       ws.onclose = () => {
+        setConnected(false);
         retries++;
         const delay = Math.min(1000 * Math.pow(2, retries), 15000);
         reconnectTimer = setTimeout(connect, delay);
@@ -150,5 +154,5 @@ export function useRealtimeFeed(): RealtimeFeedState {
     };
   }, []);
 
-  return { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert };
+  return { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert, connected };
 }

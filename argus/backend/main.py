@@ -59,7 +59,7 @@ from agents.red_team_agent import RedTeamAgent
 from agents.blue_agent import BlueAgent
 from agents.battle_engine import BattleEngine
 from agents.threat_correlator import ThreatCorrelator
-from routers import chat, redteam, analytics, agents, knowledge, battle, xai
+from routers import chat, redteam, analytics, agents, knowledge, battle, xai, benchmark, compliance
 
 # Optional Sentry
 try:
@@ -222,6 +222,8 @@ app.include_router(agents.router, prefix="/api/v1", tags=["agents"], dependencie
 app.include_router(knowledge.router, prefix="/api/v1", tags=["knowledge"], dependencies=_auth)
 app.include_router(battle.router, prefix="/api/v1", tags=["battle"], dependencies=_auth)
 app.include_router(xai.router, prefix="/api/v1", tags=["xai"], dependencies=_auth)
+app.include_router(benchmark.router, prefix="/api/v1", tags=["benchmark"], dependencies=_auth)
+app.include_router(compliance.router, prefix="/api/v1", tags=["compliance"], dependencies=_auth)
 
 
 # ─── WebSocket Live Feed ───────────────────────────────────────────────────────

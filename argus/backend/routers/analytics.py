@@ -85,3 +85,36 @@ async def get_threat_summary(request: Request):
     """Get hourly threat summary."""
     data = await request.app.state.db.get_threat_summary()
     return {"summary": data}
+
+
+@router.get("/analytics/orgs")
+async def get_org_stats(request: Request, limit: int = 50):
+    """
+    Multi-Tenant View — Group attacks by org_id.
+
+    Returns per-org threat counts for the dashboard multi-tenant panel.
+    Falls back gracefully if org_id column doesn't exist yet.
+    """
+    events = await request.app.state.db.get_recent_events(limit)
+
+    org_data: dict[str, dict] = {}
+    for ev in events:
+        oid = ev.get("org_id", "default") or "default"
+        if oid not in org_data:
+            org_data[oid] = {"org_id": oid, "total": 0, "blocked": 0, "sanitized": 0, "clean": 0, "threats": []}
+        org_data[oid]["total"] += 1
+        action = ev.get("action", "")
+        if action == "BLOCKED":
+            org_data[oid]["blocked"] += 1
+        elif action == "SANITIZED":
+            org_data[oid]["sanitized"] += 1
+        else:
+            org_data[oid]["clean"] += 1
+
+        tt = ev.get("threat_type")
+        if tt and tt not in org_data[oid]["threats"]:
+            org_data[oid]["threats"].append(tt)
+
+    orgs = sorted(org_data.values(), key=lambda x: -x["total"])
+    return {"orgs": orgs, "count": len(orgs)}
+

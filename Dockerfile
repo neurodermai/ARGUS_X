@@ -42,8 +42,11 @@ print('Model + tokenizer baked into image.'); \
         echo "No HF_MODEL_REPO set — skipping model download (rule-only mode)"; \
     fi
 
-# ── Stage 3: Runner (lean runtime image) ─────────────────────────────────────
+# ── Stage 3: Runner (lean runtime image, non-root) ───────────────────────────
 FROM python:3.11-slim AS runner
+
+# SECURITY: Create non-root user before copying anything
+RUN groupadd -r argus && useradd -r -g argus -d /app -s /sbin/nologin argus
 
 WORKDIR /app
 
@@ -54,7 +57,7 @@ COPY --from=builder /install /usr/local
 COPY --from=model-fetcher /models /app/argus/backend/models
 
 # Copy project
-COPY . .
+COPY --chown=argus:argus . .
 
 # Set working directory to backend
 WORKDIR /app/argus/backend
@@ -63,6 +66,9 @@ WORKDIR /app/argus/backend
 ENV MODEL_DIR=/app/argus/backend/models
 # Railway sets PORT dynamically
 ENV PORT=8000
+
+# SECURITY: Run as non-root user
+USER argus
 
 # Start
 CMD python -m uvicorn main:app --host 0.0.0.0 --port $PORT

@@ -2,7 +2,6 @@ import { memo, useMemo } from 'react';
 import { fonts } from '../theme';
 import { THREAT_COLORS } from '../constants';
 import { SophMeter } from './SophMeter';
-import { randFloat } from '../utils/helpers';
 import type { AttackEvent } from '../types';
 
 interface XAICardProps {
@@ -12,15 +11,21 @@ interface XAICardProps {
 function XAICardInner({ attack }: XAICardProps) {
   const color = THREAT_COLORS[attack.type] || '#ff1744';
 
-  // Stabilized random values — computed once per attack.id
-  const layerScores = useMemo(
-    () => [
-      { name: 'Regex Engine', v: attack.blocked ? randFloat(0.6, 0.99) : randFloat(0.1, 0.4) },
-      { name: 'ML Classifier', v: attack.blocked ? randFloat(0.75, 0.98) : randFloat(0.4, 0.72) },
-      { name: 'Output Auditor', v: attack.blocked ? randFloat(0.5, 0.95) : randFloat(0.2, 0.5) },
-    ],
-    [attack.id],
-  );
+  // Real layer scores derived from backend data — no fake random values.
+  // attack.score is the firewall confidence (0-1), attack.layer indicates
+  // which layer triggered, and attack.soph indicates sophistication.
+  const layerScores = useMemo(() => {
+    const s = attack.score;
+    const isRegex = attack.layer === 'INPUT_FIREWALL' || attack.layer === 'INPUT';
+    const isML = attack.layer === 'ONNX_ML_CLASSIFIER';
+    const isAudit = attack.layer === 'OUTPUT' || attack.layer === 'OUTPUT_AUDITOR';
+
+    return [
+      { name: 'Regex Engine', v: isRegex ? Math.min(s, 1) : attack.blocked ? s * 0.3 : 0 },
+      { name: 'ML Classifier', v: isML ? Math.min(s, 1) : attack.blocked ? Math.min(attack.soph / 10, 1) : 0 },
+      { name: 'Output Auditor', v: isAudit ? Math.min(s, 1) : 0 },
+    ];
+  }, [attack.id, attack.score, attack.layer, attack.blocked, attack.soph]);
 
   return (
     <div
