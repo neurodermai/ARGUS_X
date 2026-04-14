@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, memo } from 'react';
 import { THREAT_COLORS } from '../constants';
 import { randInt } from '../utils/helpers';
 import type { AttackEvent } from '../types';
@@ -32,7 +32,7 @@ interface Ring {
   color: string;
 }
 
-export function NeuralCanvas({ attacks }: NeuralCanvasProps) {
+export const NeuralCanvas = memo(function NeuralCanvas({ attacks }: NeuralCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<{
@@ -268,4 +268,4 @@ export function NeuralCanvas({ attacks }: NeuralCanvasProps) {
       />
     </div>
   );
-}
+});

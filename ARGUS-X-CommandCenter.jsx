@@ -83,13 +83,23 @@ function randFloat(min, max) { return +(Math.random() * (max - min) + min).toFix
 // function generateAttack() { ... }
 
 // ── XSS Prevention ──────────────────────────────────────────────────
-// SECURITY: All attack payloads are untrusted input from the backend.
-// React escapes JSX text by default, but this helper provides defense-in-depth
-// in case dangerouslySetInnerHTML or innerHTML is ever introduced.
+// PRIMARY DEFENSE: React's JSX escaping. React automatically escapes all
+// values embedded in JSX, preventing script injection.
+//
+// SECONDARY (defense-in-depth): This helper strips additional XSS vectors
+// as a safety net. It does NOT make strings safe for innerHTML.
+//
 // WARNING: Do NOT use dangerouslySetInnerHTML anywhere in this file.
+// If HTML rendering is ever needed, use a proper allowlist sanitizer (DOMPurify).
 function sanitizeText(str) {
   if (typeof str !== "string") return "";
-  return str.replace(/[<>]/g, "").replace(/\0/g, "");
+  return str
+    .replace(/[\x00]/g, "")                          // null bytes
+    .replace(/[<>]/g, "")                            // angle brackets
+    .replace(/on\w+\s*=/gi, "")                      // event handlers (onerror=, onload=, etc.)
+    .replace(/javascript\s*:/gi, "")                 // javascript: URIs
+    .replace(/vbscript\s*:/gi, "")                   // vbscript: URIs
+    .replace(/data\s*:[^,]*;base64/gi, "");          // data: base64 URIs
 }
 
 function normalizeEvent(ev) {

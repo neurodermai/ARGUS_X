@@ -46,7 +46,7 @@ from utils.logger import setup_logger
 from utils.supabase_client import SupabaseClient
 from utils.model_loader import ModelLoader
 from utils.session_store import SessionStore
-from utils.auth import require_api_key
+from utils.auth import require_api_key, validate_api_key_config
 from ml.firewall import InputFirewall
 from ml.auditor import OutputAuditor
 from ml.llm_core import LLMCore
@@ -73,10 +73,42 @@ except ImportError:
 log = setup_logger("argus.main")
 
 
+# ─── Task Supervisor ──────────────────────────────────────────────────────────
+RESTART_DELAY_S = 5
+
+async def supervised_task(coro_factory, name: str) -> None:
+    """
+    Supervisor wrapper for autonomous background loops.
+
+    Runs the coroutine in an infinite restart loop: if the task crashes,
+    the exception is logged and the task is restarted after a delay.
+    CancelledError (from shutdown) is re-raised to allow clean exit.
+
+    Args:
+        coro_factory: A zero-arg callable that returns the coroutine to run.
+                      Must be a factory (not an awaitable) so we can restart it.
+        name: Human-readable name for logging.
+    """
+    while True:
+        try:
+            log.info(f"🟢 [{name}] Starting…")
+            await coro_factory()
+        except asyncio.CancelledError:
+            log.info(f"🔴 [{name}] Cancelled — shutting down")
+            raise
+        except Exception:
+            log.exception(f"💥 [{name}] Crashed — restarting in {RESTART_DELAY_S}s")
+            await asyncio.sleep(RESTART_DELAY_S)
+
+
 # ─── Lifespan ─────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("🛡️  ARGUS-X booting up — initializing all 9 layers...")
+
+    # SECURITY: Validate API key configuration before anything else.
+    # Crashes in production if API_KEY is missing. Warns in dev.
+    validate_api_key_config()
 
     # Layer 1: Database
     app.state.db = SupabaseClient()
@@ -116,32 +148,33 @@ async def lifespan(app: FastAPI):
     # Broadcast helper (must be set inside lifespan after state exists)
     app.state.broadcast = _broadcast
 
-    # Start autonomous loops (wrapped for safety)
-    try:
-        asyncio.create_task(app.state.red_agent.autonomous_loop())
-        log.info("🔴 Red Agent autonomous loop started")
-    except Exception as e:
-        log.warning(f"Red Agent loop failed to start: {e}")
+    # Wire broadcast into correlator for real-time campaign push
+    app.state.correlator._broadcast = lambda data: _broadcast(app, "campaign", data)
 
-    try:
-        asyncio.create_task(app.state.correlator.correlation_loop())
-        log.info("🔗 Threat Correlator loop started")
-    except Exception as e:
-        log.warning(f"Correlator loop failed to start: {e}")
-
-    try:
-        asyncio.create_task(app.state.battle.start())
-        log.info("⚔️ Battle Engine loop started")
-    except Exception as e:
-        log.warning(f"Battle Engine loop failed to start: {e}")
+    # Start autonomous loops — supervised for auto-restart on crash.
+    # Each task uses a lambda factory so the coroutine can be re-created on restart.
+    _tasks = [
+        asyncio.create_task(supervised_task(
+            lambda: app.state.red_agent.autonomous_loop(), "Red Agent"
+        )),
+        asyncio.create_task(supervised_task(
+            lambda: app.state.correlator.correlation_loop(), "Threat Correlator"
+        )),
+        asyncio.create_task(supervised_task(
+            lambda: app.state.battle.start(), "Battle Engine"
+        )),
+    ]
 
     log.info("✅ ARGUS-X fully operational — all 9 layers active")
     yield
     log.info("🔴 ARGUS-X shutting down")
-    # Graceful shutdown of all autonomous loops
+    # Graceful shutdown: signal loops to stop, then cancel supervisor tasks
     app.state.red_agent.stop()
     app.state.correlator.stop()
     app.state.battle.stop()
+    for task in _tasks:
+        task.cancel()
+    await asyncio.gather(*_tasks, return_exceptions=True)
     await app.state.session_store.close()
 
 

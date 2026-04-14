@@ -9,12 +9,20 @@ import { WS_URL } from '../utils/config';
 import { normalizeEvent } from '../utils/sanitize';
 import { uid } from '../utils/helpers';
 
+interface CampaignWsAlert {
+  pattern: string;
+  eventCount: number;
+  sourceCount: number;
+  severity: string;
+}
+
 interface RealtimeFeedState {
   attacks: AttackEvent[];
   defenseLog: LogEntry[];
   lastUpdated: Date | null;
   sophHistory: number[];
   latHistory: number[];
+  campaignWsAlert: CampaignWsAlert | null;
 }
 
 export function useRealtimeFeed(): RealtimeFeedState {
@@ -23,6 +31,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [sophHistory, setSophHistory] = useState<number[]>([1, 2, 1, 3, 2, 4, 3, 4, 5, 4]);
   const [latHistory, setLatHistory] = useState<number[]>([28, 35, 22, 41, 30, 26, 38, 44, 29, 33]);
+  const [campaignWsAlert, setCampaignWsAlert] = useState<CampaignWsAlert | null>(null);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -63,6 +72,19 @@ export function useRealtimeFeed(): RealtimeFeedState {
               const batch = historyBuf.splice(0);
               setAttacks((prev) => [...batch, ...prev].slice(0, 60));
             }, 150);
+            return;
+          }
+
+          // Campaign alert pushed from correlator
+          if (msg.type === 'campaign' && msg.data) {
+            const d = msg.data as Record<string, unknown>;
+            setCampaignWsAlert({
+              pattern: String(d.threat_type || 'UNKNOWN').replace(/_/g, ' '),
+              eventCount: Number(d.events_count || 0),
+              sourceCount: Number(d.unique_users || 0),
+              severity: String(d.severity || 'HIGH'),
+            });
+            setTimeout(() => setCampaignWsAlert(null), 6000);
             return;
           }
 
@@ -128,5 +150,5 @@ export function useRealtimeFeed(): RealtimeFeedState {
     };
   }, []);
 
-  return { attacks, defenseLog, lastUpdated, sophHistory, latHistory };
+  return { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert };
 }

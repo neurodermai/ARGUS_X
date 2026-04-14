@@ -7,6 +7,7 @@
 // all sub-panels are modular components.
 // ═══════════════════════════════════════════════════════════════════════
 
+import { useMemo } from 'react';
 import { fonts } from '../theme';
 import { THREAT_COLORS } from '../constants';
 import { useRealtimeFeed } from '../hooks/useRealtimeFeed';
@@ -20,12 +21,17 @@ import { BattleStatus } from './BattleStatus';
 import { MiniClusterMap } from './MiniClusterMap';
 import { CampaignAlert } from './CampaignAlert';
 import { DefenseLog } from './DefenseLog';
+import { ErrorBoundary } from './ErrorBoundary';
+import { AttackTimeline } from './AttackTimeline';
+import { PatchBanner } from './PatchBanner';
+import { BypassHistory } from './BypassHistory';
 
 export default function CommandCenter() {
   // ── Data hooks ─────────────────────────────────────────────────────
-  const { attacks, defenseLog, lastUpdated, sophHistory, latHistory } = useRealtimeFeed();
+  const { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert } = useRealtimeFeed();
   const {
-    stats, tier, threatLevel, campaignCount,
+    stats, tier, threatLevel, campaignCount, threatVelocity,
+    lastPatch, showPatch,
     showAlert, alertMsg, alertHistory,
     showAlertHistory, setShowAlertHistory,
   } = useStats();
@@ -42,6 +48,22 @@ export default function CommandCenter() {
       ).toFixed(1)
     : 0;
 
+  // Stabilize attacks reference for canvas components (React.memo).
+  // Only recompute when the latest attack ID changes — prevents
+  // unnecessary re-renders on every parent state update.
+  const canvasAttacks = useMemo(
+    () => attacks.slice(0, 30),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attacks.length > 0 ? attacks[0].id : 0],
+  );
+
+  // Merge WS campaign alerts (instant) with polled alerts (fallback).
+  // WS alerts take priority when active.
+  const effectiveShowAlert = campaignWsAlert ? true : showAlert;
+  const effectiveAlertMsg = campaignWsAlert
+    ? `CAMPAIGN DETECTED: ${campaignWsAlert.pattern} · ${campaignWsAlert.eventCount} events from ${campaignWsAlert.sourceCount} unique sources`
+    : alertMsg;
+
   return (
     <div
       style={{
@@ -57,12 +79,15 @@ export default function CommandCenter() {
     >
       {/* ── CAMPAIGN ALERTS ── */}
       <CampaignAlert
-        showAlert={showAlert}
-        alertMsg={alertMsg}
+        showAlert={effectiveShowAlert}
+        alertMsg={effectiveAlertMsg}
         alertHistory={alertHistory}
         showAlertHistory={showAlertHistory}
         onToggleHistory={() => setShowAlertHistory((v: boolean) => !v)}
       />
+
+      {/* ── PATCH BANNER ── */}
+      <PatchBanner patch={lastPatch} visible={showPatch} />
 
       {/* ── HEADER ── */}
       <div
@@ -195,7 +220,9 @@ export default function CommandCenter() {
               </div>
             </div>
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 8, overflow: 'hidden' }}>
-              <NeuralCanvas attacks={attacks} />
+              <ErrorBoundary label="NEURAL THREAT MAP">
+                <NeuralCanvas attacks={canvasAttacks} />
+              </ErrorBoundary>
             </div>
           </div>
 
@@ -256,18 +283,22 @@ export default function CommandCenter() {
             {/* AI Battle */}
             <div style={{ background: '#080d1c', border: '1px solid #1a2845', borderRadius: 8, padding: '10px 12px' }}>
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', letterSpacing: '0.15em', marginBottom: 7 }}>AI vs AI BATTLE</div>
-              <BattleStatus
-                redAtks={stats.total}
-                blueBlocks={stats.blocked}
-                redBypasses={stats.bypasses}
-                tier={tier}
-              />
+              <ErrorBoundary label="AI BATTLE">
+                <BattleStatus
+                  redAtks={stats.total}
+                  blueBlocks={stats.blocked}
+                  redBypasses={stats.bypasses}
+                  tier={tier}
+                />
+              </ErrorBoundary>
             </div>
 
             {/* Cluster map */}
             <div style={{ background: '#080d1c', border: '1px solid #1a2845', borderRadius: 8, padding: '10px 12px' }}>
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', letterSpacing: '0.15em', marginBottom: 7 }}>THREAT CLUSTERS</div>
-              <MiniClusterMap attacks={attacks} />
+              <ErrorBoundary label="THREAT CLUSTERS">
+                <MiniClusterMap attacks={canvasAttacks} />
+              </ErrorBoundary>
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', marginTop: 4 }}>
                 {Object.keys(THREAT_COLORS).length} cluster families active
               </div>
@@ -279,11 +310,33 @@ export default function CommandCenter() {
               <div style={{ fontFamily: fonts.display, fontSize: 24, fontWeight: 700, color: '#d500f9', lineHeight: 1 }}>{stats.muts}</div>
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', marginTop: 3 }}>variants pre-blocked · zero human input</div>
             </div>
+
+            {/* Self-healing history */}
+            <ErrorBoundary label="BYPASS HISTORY">
+              <BypassHistory />
+            </ErrorBoundary>
           </div>
         </div>
 
-        {/* ── BOTTOM: Defense Log ── */}
-        <DefenseLog entries={defenseLog} />
+        {/* ── BOTTOM: Attack Velocity Timeline + Defense Log ── */}
+        <div style={{ background: '#030508', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', overflow: 'hidden' }}>
+          {/* Attack Velocity Timeline */}
+          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '8px 12px 7px', borderBottom: '1px solid #1a2845', flexShrink: 0 }}>
+              <div style={{ fontFamily: fonts.mono, fontSize: 8, letterSpacing: '0.2em', color: '#3a5070', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#ff1744', animation: 'pulse 0.7s ease-in-out infinite' }} />
+                ATTACK VELOCITY · 5MIN
+              </div>
+            </div>
+            <div style={{ flex: 1, padding: 8, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+              <ErrorBoundary label="ATTACK TIMELINE">
+                <AttackTimeline velocity={threatVelocity} />
+              </ErrorBoundary>
+            </div>
+          </div>
+          {/* Defense Log */}
+          <DefenseLog entries={defenseLog} />
+        </div>
       </div>
     </div>
   );

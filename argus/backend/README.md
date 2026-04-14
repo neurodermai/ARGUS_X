@@ -53,7 +53,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 |----------|----------|-------------|
 | `SUPABASE_URL` | Yes | Your Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Yes | Service role key (bypasses RLS — backend only) |
-| `SUPABASE_ANON_KEY` | No | Anon key (respects RLS — for frontend) |
+| `SUPABASE_ANON_KEY` | Recommended | Anon key (respects RLS — used for backend reads) |
 | `HF_MODEL_REPO` | No | HuggingFace model repo for ONNX |
 | `ANTHROPIC_API_KEY` | No | For Claude LLM (falls back to mock) |
 | `LLM_MODEL` | No | LiteLLM model identifier |

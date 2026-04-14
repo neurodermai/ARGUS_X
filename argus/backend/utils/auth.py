@@ -14,6 +14,36 @@ log = logging.getLogger("argus.auth")
 
 # ── Configuration ────────────────────────────────────────────────────────────
 _API_KEY: Optional[str] = os.getenv("API_KEY", "")
+_ENV: str = os.getenv("ENV", "development").lower().strip()
+
+
+def validate_api_key_config() -> None:
+    """
+    Startup guard — call once during app lifespan initialization.
+
+    - Production (ENV=production): raises RuntimeError if API_KEY is empty.
+      This guarantees unauthenticated deployments can never start.
+    - All other environments: logs a loud warning so developers are aware
+      that auth is disabled, but does NOT crash the server.
+    """
+    if _API_KEY:
+        log.info("🔐 API_KEY is configured — endpoint authentication is ENABLED")
+        return
+
+    if _ENV == "production":
+        raise RuntimeError(
+            "FATAL: API_KEY environment variable is not set. "
+            "Production deployments MUST have API_KEY configured to protect "
+            "all /api/v1 endpoints. Set API_KEY in your environment or "
+            "secrets manager before starting the server."
+        )
+
+    # Dev / staging / demo — warn but allow startup
+    log.warning(
+        "⚠️  API_KEY is NOT set — all /api/v1 endpoints are UNPROTECTED. "
+        "This is acceptable for local development only. "
+        "Set API_KEY before deploying to any shared or public environment."
+    )
 
 # Header scheme — appears in OpenAPI docs as a security requirement
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)

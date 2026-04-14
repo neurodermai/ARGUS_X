@@ -6,6 +6,7 @@ with in-memory fallback for local development.
 import json
 import os
 import logging
+import time
 
 log = logging.getLogger("argus.session_store")
 
@@ -19,10 +20,15 @@ SESSION_TTL = 86400
 class SessionStore:
     """Async session store with Redis persistence and in-memory fallback."""
 
+    # Evict expired in-memory entries every N writes
+    _EVICT_EVERY = 100
+
     def __init__(self):
         self._redis = None
-        self._memory: dict = {}
+        # In-memory store: session_id → (data_dict, expiry_timestamp)
+        self._memory: dict[str, tuple[dict, float]] = {}
         self._prefix = "argus:session:"
+        self._write_count = 0
 
     async def init(self):
         """Attempt to connect to Redis. Falls back to in-memory if unavailable."""
@@ -58,8 +64,13 @@ class SessionStore:
             except Exception as e:
                 log.warning(f"Redis GET failed for {session_id}: {e}")
         else:
-            if session_id in self._memory:
-                return self._memory[session_id].copy()
+            entry = self._memory.get(session_id)
+            if entry is not None:
+                data, expiry = entry
+                if time.monotonic() < expiry:
+                    return data.copy()
+                # Expired — remove and return default
+                del self._memory[session_id]
 
         return _DEFAULT_SESSION.copy()
 
@@ -88,7 +99,20 @@ class SessionStore:
                 log.warning(f"Redis SET failed for {session_id}: {e}")
                 # Fall through — data lost for this update, but no crash
         else:
-            self._memory[session_id] = session
+            self._memory[session_id] = (session, time.monotonic() + SESSION_TTL)
+            self._write_count += 1
+            if self._write_count >= self._EVICT_EVERY:
+                self._evict_expired()
+                self._write_count = 0
+
+    def _evict_expired(self) -> None:
+        """Remove all expired entries from the in-memory store."""
+        now = time.monotonic()
+        expired = [k for k, (_, exp) in self._memory.items() if now >= exp]
+        for k in expired:
+            del self._memory[k]
+        if expired:
+            log.debug(f"Evicted {len(expired)} expired sessions ({len(self._memory)} remaining)")
 
     async def close(self):
         """Clean shutdown."""

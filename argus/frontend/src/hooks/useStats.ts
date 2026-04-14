@@ -3,15 +3,19 @@
 // Polls /api/v1/analytics/stats every 3s for dashboard statistics
 // ═══════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Stats, AlertEntry } from '../types';
 import { API_URL } from '../utils/config';
+import type { PatchEvent } from '../components/PatchBanner';
 
 interface StatsState {
   stats: Stats;
   tier: number;
   threatLevel: number;
   campaignCount: number;
+  threatVelocity: Record<string, number>;
+  lastPatch: PatchEvent | null;
+  showPatch: boolean;
   showAlert: boolean;
   alertMsg: string;
   alertHistory: AlertEntry[];
@@ -34,16 +38,30 @@ export function useStats(): StatsState {
   const [alertMsg, setAlertMsg] = useState('');
   const [alertHistory, setAlertHistory] = useState<AlertEntry[]>([]);
   const [showAlertHistory, setShowAlertHistory] = useState(false);
+  const [threatVelocity, setThreatVelocity] = useState<Record<string, number>>({});
+  const [lastPatch, setLastPatch] = useState<PatchEvent | null>(null);
+  const [showPatch, setShowPatch] = useState(false);
+  const lastPatchTsRef = useRef<string>('');
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+
+    const BASE_INTERVAL = 3000;
+    const MAX_INTERVAL = 30000;
+    let currentInterval = BASE_INTERVAL;
 
     async function poll() {
       try {
-        const res = await fetch(`${API_URL}/api/v1/analytics/stats`);
+        const res = await fetch(`${API_URL}/api/v1/analytics/stats`, {
+          signal: controller.signal,
+        });
         if (!res.ok || !active) return;
         const data = await res.json();
         if (!active) return;
+
+        // Reset backoff on success
+        currentInterval = BASE_INTERVAL;
 
         setStats({
           total: data.total || 0,
@@ -55,6 +73,10 @@ export function useStats(): StatsState {
 
         if (data.battle) {
           setTier(data.battle.red_tier || 1);
+        }
+
+        if (data.threat_velocity && typeof data.threat_velocity === 'object') {
+          setThreatVelocity(data.threat_velocity);
         }
 
         if (data.evolution && typeof data.evolution.threat_level === 'number') {
@@ -84,16 +106,32 @@ export function useStats(): StatsState {
             }
           }
         }
-      } catch {
-        /* silently retry next cycle */
+
+        // Detect new auto-patch events from the red agent
+        if (data.agent?.last_patch?.ts && data.agent.last_patch.ts !== lastPatchTsRef.current) {
+          lastPatchTsRef.current = data.agent.last_patch.ts;
+          setLastPatch(data.agent.last_patch as PatchEvent);
+          setShowPatch(true);
+          setTimeout(() => setShowPatch(false), 8000);
+        }
+      } catch (err: unknown) {
+        // Aborted fetches are expected during cleanup — don't backoff
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+
+        // Exponential backoff: 3s → 6s → 12s → 24s → capped at 30s
+        currentInterval = Math.min(currentInterval * 2, MAX_INTERVAL);
+      }
+
+      // Schedule next poll only after current one completes (no overlap)
+      if (active) {
+        setTimeout(poll, currentInterval);
       }
     }
 
     poll();
-    const interval = setInterval(poll, 3000);
     return () => {
       active = false;
-      clearInterval(interval);
+      controller.abort();
     };
   }, []);
 
@@ -102,6 +140,9 @@ export function useStats(): StatsState {
     tier,
     threatLevel,
     campaignCount,
+    threatVelocity,
+    lastPatch,
+    showPatch,
     showAlert,
     alertMsg,
     alertHistory,

@@ -19,5 +19,18 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // SECURITY: Ban dangerouslySetInnerHTML to enforce React's built-in
+      // JSX escaping as the sole XSS defense. If HTML rendering is ever
+      // needed, use DOMPurify and disable this rule per-line with justification.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXAttribute[name.name="dangerouslySetInnerHTML"]',
+          message:
+            'SECURITY: dangerouslySetInnerHTML is banned. React JSX escaping is the primary XSS defense. Use DOMPurify if raw HTML rendering is absolutely required.',
+        },
+      ],
+    },
   },
 ])
