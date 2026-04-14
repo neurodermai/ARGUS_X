@@ -6,6 +6,7 @@ SECURITY: This endpoint is compute-heavy (firewall + fingerprint + mutation + XA
   - Optional X-RedTeam-Token header protection (env-based)
 """
 import os
+import hashlib
 from fastapi import APIRouter, Request, Header, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -91,7 +92,7 @@ async def redteam_test(
         "user_id": "redteam",
         "session_id": "redteam-" + str(uuid.uuid4())[:4],
         "score": fw_result.get("score", 0),
-        "preview": (req.message[:80] + "…") if len(req.message) > 80 else req.message,
+        "preview": hashlib.sha256(req.message.encode()).hexdigest()[:16] + " [REDACTED]",
     })
 
     return {
@@ -123,8 +124,12 @@ async def get_bypass_history(request: Request, limit: int = 10):
     # Enrich each entry with patch context
     entries = []
     for row in db_results:
+        # SECURITY: Never expose raw attack payloads — hash + redact
+        raw_text = row.get("attack_text", "")
+        text_hash = hashlib.sha256(raw_text.encode()).hexdigest()[:16] if raw_text else ""
         entries.append({
-            "before": row.get("attack_text", ""),
+            "before_hash": text_hash,
+            "before_preview": (raw_text[:20] + "[REDACTED]") if raw_text else "",
             "type": row.get("attack_type", "UNKNOWN"),
             "tier": row.get("tier", 1),
             "score": row.get("score", 0),

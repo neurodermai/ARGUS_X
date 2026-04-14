@@ -187,14 +187,16 @@ app = FastAPI(
 )
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
-_default_origins = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:8000",
-]
-_env_origins = os.getenv("CORS_ORIGINS", "")
-_extra_origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else []
-ALLOWED_ORIGINS = _extra_origins + _default_origins
+# SECURITY: Only the trusted frontend origin is allowed.
+# Set FRONTEND_URL in production (e.g. "https://argus-x.example.com").
+# Defaults to localhost:5173 for local development only.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# Guard: reject wildcard — it must never reach production.
+if FRONTEND_URL.strip() == "*":
+    raise RuntimeError("FATAL: FRONTEND_URL must not be '*'. Set a specific origin.")
+
+ALLOWED_ORIGINS = [FRONTEND_URL]
 
 app.add_middleware(
     CORSMiddleware,

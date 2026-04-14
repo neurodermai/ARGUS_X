@@ -6,6 +6,7 @@ Mutation → XAI → Evolution → Clustering → Correlation → Supabase Realt
 import os
 import time
 import uuid
+import hashlib
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Request
@@ -61,12 +62,19 @@ def _build_event(user_id, session_id, message, action, threat_type,
                  score, layer, latency, method, sophistication=0,
                  fingerprint=None, mutations=0, explanation=None,
                  session_threat_level="LOW"):
+    # SECURITY: Never expose raw attack payloads in event previews.
+    # CLEAN events are safe to preview (benign input); threats are redacted.
+    if action in ("BLOCKED", "SANITIZED"):
+        preview = hashlib.sha256(message.encode()).hexdigest()[:16] + " [REDACTED]"
+    else:
+        preview = (message[:115] + "…") if len(message) > 115 else message
+
     return {
         "id":                    str(uuid.uuid4())[:8],
         "ts":                    datetime.utcnow().isoformat() + "Z",
         "user_id":               user_id,
         "session_id":            session_id,
-        "preview":               (message[:115] + "…") if len(message) > 115 else message,
+        "preview":               preview,
         "action":                action,
         "threat_type":           threat_type,
         "score":                 round(score, 4),

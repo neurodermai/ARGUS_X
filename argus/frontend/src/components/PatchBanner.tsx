@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // ARGUS-X — Patch Banner
 // Shows a "VULNERABILITY PATCHED" alert when the system self-heals.
-// Displays before (bypass payload) → after (patch applied).
+// Displays redacted bypass hash → after (patch applied).
 // Auto-dismisses after 8 seconds.
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -10,7 +10,8 @@ import { fonts } from '../theme';
 import { THREAT_COLORS } from '../constants';
 
 export interface PatchEvent {
-  before: string;
+  before_hash: string;
+  before_preview: string;
   type: string;
   tier: number;
   after: string;
@@ -100,7 +101,7 @@ export const PatchBanner = memo(function PatchBanner({ patch, visible }: PatchBa
               marginBottom: 4,
             }}
           >
-            ✕ BYPASS PAYLOAD
+             ✕ BYPASS DETECTED
           </div>
           <div
             style={{
@@ -117,7 +118,7 @@ export const PatchBanner = memo(function PatchBanner({ patch, visible }: PatchBa
               wordBreak: 'break-all',
             }}
           >
-            {patch.before}
+            {patch.before_preview}
           </div>
         </div>
 
