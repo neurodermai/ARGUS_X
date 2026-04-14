@@ -7,9 +7,8 @@ uvicorn[standard]==0.34.3
 pydantic==2.11.3
 python-dotenv==1.1.0
 
-# Supabase
+# Supabase (postgrest is pulled transitively by supabase)
 supabase==2.15.2
-postgrest==0.19.4
 
 # LLM
 litellm==1.73.6
