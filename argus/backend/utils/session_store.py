@@ -3,6 +3,7 @@ ARGUS-X — Session Threat Store
 Persistent session storage backed by Redis when available,
 with in-memory fallback for local development.
 """
+import asyncio
 import json
 import os
 import logging
@@ -15,6 +16,9 @@ _DEFAULT_SESSION = {"total": 0, "threats": 0, "last_score": 0, "escalation": 0, 
 
 # Session TTL: 24 hours (seconds)
 SESSION_TTL = 86400
+
+# Max in-memory sessions to prevent memory exhaustion
+MAX_MEMORY_SESSIONS = 10000
 
 
 class SessionStore:
@@ -29,6 +33,8 @@ class SessionStore:
         self._memory: dict[str, tuple[dict, float]] = {}
         self._prefix = "argus:session:"
         self._write_count = 0
+        # SECURITY: Lock for atomic read-modify-write on in-memory sessions
+        self._lock = asyncio.Lock()
 
     async def init(self):
         """Attempt to connect to Redis. Falls back to in-memory if unavailable."""
@@ -76,34 +82,60 @@ class SessionStore:
 
     async def update_session(self, session_id: str, user_id: str, action: str, score: float):
         """Update session threat counters atomically."""
-        session = await self.get_session(session_id)
-
-        if not session.get("user_id"):
-            session["user_id"] = user_id
-
-        session["total"] += 1
-        if action in ("BLOCKED", "SANITIZED"):
-            session["threats"] += 1
-            if score > session["last_score"]:
-                session["escalation"] += 1
-        session["last_score"] = score
-
         if self._redis:
+            # Redis: use pipeline for atomic read-modify-write
             try:
-                await self._redis.set(
-                    self._key(session_id),
-                    json.dumps(session),
-                    ex=SESSION_TTL,
-                )
+                key = self._key(session_id)
+                raw = await self._redis.get(key)
+                session = json.loads(raw) if raw else _DEFAULT_SESSION.copy()
+
+                if not session.get("user_id"):
+                    session["user_id"] = user_id
+                session["total"] += 1
+                if action in ("BLOCKED", "SANITIZED"):
+                    session["threats"] += 1
+                    if score > session["last_score"]:
+                        session["escalation"] += 1
+                session["last_score"] = score
+
+                await self._redis.set(key, json.dumps(session), ex=SESSION_TTL)
             except Exception as e:
                 log.warning(f"Redis SET failed for {session_id}: {e}")
-                # Fall through — data lost for this update, but no crash
         else:
-            self._memory[session_id] = (session, time.monotonic() + SESSION_TTL)
-            self._write_count += 1
-            if self._write_count >= self._EVICT_EVERY:
-                self._evict_expired()
-                self._write_count = 0
+            # In-memory: use lock for atomic update
+            async with self._lock:
+                entry = self._memory.get(session_id)
+                if entry is not None:
+                    data, expiry = entry
+                    if time.monotonic() >= expiry:
+                        data = _DEFAULT_SESSION.copy()
+                    session = data
+                else:
+                    session = _DEFAULT_SESSION.copy()
+
+                if not session.get("user_id"):
+                    session["user_id"] = user_id
+                session["total"] += 1
+                if action in ("BLOCKED", "SANITIZED"):
+                    session["threats"] += 1
+                    if score > session["last_score"]:
+                        session["escalation"] += 1
+                session["last_score"] = score
+
+                self._memory[session_id] = (session, time.monotonic() + SESSION_TTL)
+                self._write_count += 1
+
+                # Evict expired + enforce cap
+                if self._write_count >= self._EVICT_EVERY:
+                    self._evict_expired()
+                    self._write_count = 0
+                if len(self._memory) > MAX_MEMORY_SESSIONS:
+                    # Evict oldest entries
+                    sorted_keys = sorted(
+                        self._memory, key=lambda k: self._memory[k][1]
+                    )
+                    for k in sorted_keys[:len(self._memory) - MAX_MEMORY_SESSIONS]:
+                        del self._memory[k]
 
     def _evict_expired(self) -> None:
         """Remove all expired entries from the in-memory store."""

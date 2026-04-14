@@ -4,6 +4,7 @@ Full 9-layer security pipeline: Firewall → LLM → Auditor → Fingerprint →
 Mutation → XAI → Evolution → Clustering → Correlation → Supabase Realtime
 """
 import os
+import re
 import time
 import uuid
 import hashlib
@@ -11,7 +12,7 @@ import html
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Rate limiting (graceful — no-op if slowapi not installed)
 try:
@@ -32,15 +33,42 @@ router = APIRouter()
 
 # Server-side only: demo bypass. NEVER expose this via the public API.
 # Operator must explicitly set DEMO_BYPASS_ENABLED=true in environment.
-DEMO_BYPASS_ENABLED = os.getenv("DEMO_BYPASS_ENABLED", "false").lower() == "true"
+# SECURITY: Force-disabled when ENV=production regardless of flag.
+_ENV = os.getenv("ENV", "development").lower()
+_demo_raw = os.getenv("DEMO_BYPASS_ENABLED", "false").lower() == "true"
+DEMO_BYPASS_ENABLED = _demo_raw and _ENV != "production"
+if _demo_raw and _ENV == "production":
+    import logging
+    logging.getLogger("argus.security").critical(
+        "🚨 DEMO_BYPASS_ENABLED=true IGNORED — blocked in production mode"
+    )
+
+
+# SECURITY: Allowed characters for user-facing string fields.
+# Rejects control chars, HTML tags, and SQL injection markers.
+_SAFE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-\.@]{1,64}$')
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., max_length=10000, description="User message (max 10000 chars)")
-    user_id: str = "anonymous"
-    session_id: str = ""
+    user_id: str = Field(default="anonymous", max_length=64)
+    session_id: str = Field(default="", max_length=64)
     # SECURITY: org_id is derived server-side, never from client input.
     context: list = Field(default=[], max_length=10, description="Conversation context (max 10 items)")
+
+    @field_validator('user_id')
+    @classmethod
+    def validate_user_id(cls, v: str) -> str:
+        if v and not _SAFE_ID_PATTERN.match(v):
+            return "anonymous"  # Silently sanitize to prevent injection
+        return v
+
+    @field_validator('session_id')
+    @classmethod
+    def validate_session_id(cls, v: str) -> str:
+        if v and not _SAFE_ID_PATTERN.match(v):
+            return ""  # Silently sanitize
+        return v
 
 
 class ChatResponse(BaseModel):

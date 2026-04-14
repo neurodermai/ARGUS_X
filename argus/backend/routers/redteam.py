@@ -119,7 +119,7 @@ async def get_bypass_history(request: Request, limit: int = 10):
     Returns last N bypasses with: payload, type, tier, timestamp, and patch result.
     """
     app = request.app
-    db_results = await app.state.db.get_bypass_history(min(limit, 50))
+    db_results = await app.state.db.get_bypass_history(min(max(limit, 1), 50))
 
     # Enrich each entry with patch context
     entries = []

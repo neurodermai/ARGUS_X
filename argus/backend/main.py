@@ -220,10 +220,30 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
 )
 
+
+# ─── Request Body Size Limit ──────────────────────────────────────────────────
+# SECURITY: Reject oversized request bodies to prevent DoS / memory exhaustion.
+# Max 1MB — largest legitimate payload is a 10000-char message (~10KB).
+MAX_BODY_SIZE = 1_048_576  # 1 MB
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_BODY_SIZE:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": f"Request body too large. Max {MAX_BODY_SIZE} bytes."},
+        )
+    return await call_next(request)
+
 # ─── Rate Limiting ────────────────────────────────────────────────────────────
 if RATE_LIMIT_AVAILABLE:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    log.info("✅ Rate limiting active (slowapi)")
+else:
+    log.warning("⚠️  slowapi not installed — rate limiting is DISABLED")
 
 # ─── Include Routers ──────────────────────────────────────────────────────────
 # All /api/v1 routes require X-API-Key header (when API_KEY env var is set).
