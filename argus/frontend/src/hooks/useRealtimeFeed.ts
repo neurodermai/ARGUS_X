@@ -1,47 +1,38 @@
 // ═══════════════════════════════════════════════════════════════════════
 // ARGUS-X — useRealtimeFeed Hook
 // WebSocket connection to /ws/live with reconnection + event normalization
+// State is pushed into Zustand store (no local state)
 // ═══════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect } from 'react';
-import type { AttackEvent, LogEntry, WSMessage } from '../types';
+import { useEffect } from 'react';
+import type { WSMessage, LogEntry } from '../types';
 import { WS_URL } from '../utils/config';
 import { normalizeEvent } from '../utils/sanitize';
 import { uid } from '../utils/helpers';
 import { getApiKey } from '../utils/apiKey';
+import { useArgusStore } from '../store/useArgusStore';
 
-interface CampaignWsAlert {
-  pattern: string;
-  eventCount: number;
-  sourceCount: number;
-  severity: string;
-}
-
-interface RealtimeFeedState {
-  attacks: AttackEvent[];
-  defenseLog: LogEntry[];
-  lastUpdated: Date | null;
-  sophHistory: number[];
-  latHistory: number[];
-  campaignWsAlert: CampaignWsAlert | null;
-  connected: boolean;
-}
-
-export function useRealtimeFeed(): RealtimeFeedState {
-  const [attacks, setAttacks] = useState<AttackEvent[]>([]);
-  const [defenseLog, setDefenseLog] = useState<LogEntry[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [sophHistory, setSophHistory] = useState<number[]>([]);
-  const [latHistory, setLatHistory] = useState<number[]>([]);
-  const [campaignWsAlert, setCampaignWsAlert] = useState<CampaignWsAlert | null>(null);
-  const [connected, setConnected] = useState(false);
+/**
+ * Manages the WebSocket connection lifecycle.
+ * All state updates go directly into the global Zustand store.
+ * Call this hook once in the root component (CommandCenter).
+ */
+export function useRealtimeFeed(): void {
+  const store = useArgusStore.getState;
 
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let retries = 0;
-    const historyBuf: AttackEvent[] = [];
+    const historyBuf: ReturnType<typeof normalizeEvent>[] = [];
     let historyFlush: ReturnType<typeof setTimeout> | null = null;
+
+    // Get store actions once (stable references)
+    const {
+      addAttack, addHistoryBatch, addLogEntry, addLogEntries,
+      pushSoph, pushLat, setConnected, setLastUpdated,
+      setCampaignWsAlert,
+    } = store();
 
     function connect() {
       try {
@@ -53,9 +44,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
 
       ws.onopen = () => {
         // Send auth message as first frame (auth-after-connect protocol)
-        const apiKey = typeof window !== 'undefined'
-          ? getApiKey()
-          : '';
+        const apiKey = typeof window !== 'undefined' ? getApiKey() : '';
         if (apiKey) {
           ws!.send(JSON.stringify({ type: 'auth', token: apiKey }));
         }
@@ -75,7 +64,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
             if (historyFlush) clearTimeout(historyFlush);
             historyFlush = setTimeout(() => {
               const batch = historyBuf.splice(0);
-              setAttacks((prev) => [...batch, ...prev].slice(0, 60));
+              addHistoryBatch(batch);
             }, 150);
             return;
           }
@@ -95,10 +84,10 @@ export function useRealtimeFeed(): RealtimeFeedState {
 
           // Live event (attack, sanitized, clean)
           const atk = normalizeEvent(ev);
-          setAttacks((prev) => [atk, ...prev.slice(0, 59)]);
+          addAttack(atk);
           setLastUpdated(new Date());
-          setSophHistory((prev) => [...prev.slice(-19), atk.soph]);
-          setLatHistory((prev) => [...prev.slice(-19), atk.latency]);
+          pushSoph(atk.soph);
+          pushLat(atk.latency);
 
           // Defense log entry
           const logEntry: LogEntry = {
@@ -114,7 +103,7 @@ export function useRealtimeFeed(): RealtimeFeedState {
           };
 
           if (atk.muts > 0) {
-            setDefenseLog((prev) => [
+            addLogEntries([
               {
                 id: uid(),
                 ts: logEntry.ts,
@@ -123,10 +112,9 @@ export function useRealtimeFeed(): RealtimeFeedState {
                 color: '#5a0090',
               },
               logEntry,
-              ...prev.slice(0, 38),
             ]);
           } else {
-            setDefenseLog((prev) => [logEntry, ...prev.slice(0, 39)]);
+            addLogEntry(logEntry);
           }
         } catch {
           /* ignore malformed messages */
@@ -159,7 +147,5 @@ export function useRealtimeFeed(): RealtimeFeedState {
         ws.close();
       }
     };
-  }, []);
-
-  return { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert, connected };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 }

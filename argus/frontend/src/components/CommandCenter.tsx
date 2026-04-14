@@ -3,15 +3,16 @@
 // Layer 9: The living, breathing unified system view
 // Every pixel is intentional. Every animation has meaning.
 //
-// This is the layout orchestrator only — all logic lives in hooks,
-// all sub-panels are modular components.
+// State is sourced from Zustand store (useArgusStore).
+// Hooks (useRealtimeFeed, useStatsPoller) are side-effect-only.
 // ═══════════════════════════════════════════════════════════════════════
 
 import { useMemo } from 'react';
 import { fonts } from '../theme';
 import { THREAT_COLORS } from '../constants';
 import { useRealtimeFeed } from '../hooks/useRealtimeFeed';
-import { useStats } from '../hooks/useStats';
+import { useStatsPoller } from '../hooks/useStats';
+import { useArgusStore } from '../store/useArgusStore';
 import { NeuralCanvas } from './NeuralCanvas';
 import { XAICard } from './XAICard';
 import { FeedItem } from './FeedItem';
@@ -29,18 +30,40 @@ import { FingerprintCard } from './FingerprintCard';
 import { ComplianceExport } from './ComplianceExport';
 
 export default function CommandCenter() {
-  // ── Data hooks ─────────────────────────────────────────────────────
-  const { attacks, defenseLog, lastUpdated, sophHistory, latHistory, campaignWsAlert, connected } = useRealtimeFeed();
-  const {
-    stats, tier, threatLevel, campaignCount, threatVelocity,
-    lastPatch, showPatch,
-    showAlert, alertMsg, alertHistory,
-    showAlertHistory, setShowAlertHistory,
-    redAgentRunning, loading,
-  } = useStats();
+  // ── Side-effect hooks (push data into Zustand) ──────────────────
+  useRealtimeFeed();
+  useStatsPoller();
 
-  // ── Derived values ─────────────────────────────────────────────────
-  const blockRate = stats.total > 0 ? Math.round((stats.blocked / stats.total) * 100) : 100;
+  // ── Read from Zustand store ─────────────────────────────────────
+  const attacks = useArgusStore((s) => s.attacks);
+  const defenseLog = useArgusStore((s) => s.defenseLog);
+  const lastUpdated = useArgusStore((s) => s.lastUpdated);
+  const sophHistory = useArgusStore((s) => s.sophHistory);
+  const latHistory = useArgusStore((s) => s.latHistory);
+  const connected = useArgusStore((s) => s.connected);
+
+  const total = useArgusStore((s) => s.total);
+  const blocked = useArgusStore((s) => s.blocked);
+  const muts = useArgusStore((s) => s.muts);
+  const bypasses = useArgusStore((s) => s.bypasses);
+  const tier = useArgusStore((s) => s.tier);
+  const threatLevel = useArgusStore((s) => s.threatLevel);
+  const campaignCount = useArgusStore((s) => s.campaignCount);
+  const threatVelocity = useArgusStore((s) => s.threatVelocity);
+  const redAgentRunning = useArgusStore((s) => s.redAgentRunning);
+  const loading = useArgusStore((s) => s.loading);
+
+  const campaignWsAlert = useArgusStore((s) => s.campaignWsAlert);
+  const showAlert = useArgusStore((s) => s.showAlert);
+  const alertMsg = useArgusStore((s) => s.alertMsg);
+  const alertHistory = useArgusStore((s) => s.alertHistory);
+  const showAlertHistory = useArgusStore((s) => s.showAlertHistory);
+  const lastPatch = useArgusStore((s) => s.lastPatch);
+  const showPatch = useArgusStore((s) => s.showPatch);
+  const toggleAlertHistory = useArgusStore((s) => s.toggleAlertHistory);
+
+  // ── Derived values ─────────────────────────────────────────────
+  const blockRate = total > 0 ? Math.round((blocked / total) * 100) : 100;
   const sophAvg = sophHistory.length
     ? +(sophHistory.reduce((a, b) => a + b, 0) / sophHistory.length).toFixed(1)
     : 0;
@@ -52,8 +75,6 @@ export default function CommandCenter() {
     : 0;
 
   // Stabilize attacks reference for canvas components (React.memo).
-  // Only recompute when the latest attack ID changes — prevents
-  // unnecessary re-renders on every parent state update.
   const canvasAttacks = useMemo(
     () => attacks.slice(0, 30),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -61,7 +82,6 @@ export default function CommandCenter() {
   );
 
   // Merge WS campaign alerts (instant) with polled alerts (fallback).
-  // WS alerts take priority when active.
   const effectiveShowAlert = campaignWsAlert ? true : showAlert;
   const effectiveAlertMsg = campaignWsAlert
     ? `CAMPAIGN DETECTED: ${campaignWsAlert.pattern} · ${campaignWsAlert.eventCount} events from ${campaignWsAlert.sourceCount} unique sources`
@@ -89,7 +109,7 @@ export default function CommandCenter() {
         alertMsg={effectiveAlertMsg}
         alertHistory={alertHistory}
         showAlertHistory={showAlertHistory}
-        onToggleHistory={() => setShowAlertHistory((v: boolean) => !v)}
+        onToggleHistory={toggleAlertHistory}
       />
 
       {/* ── PATCH BANNER ── */}
@@ -126,9 +146,9 @@ export default function CommandCenter() {
         {/* Center stats */}
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' as const }}>
           {[
-            { label: 'BLOCKED', val: stats.blocked, color: '#ff1744' },
-            { label: 'PRE-BLOCKED', val: stats.muts, color: '#d500f9' },
-            { label: 'BYPASSES', val: stats.bypasses, color: '#ffab00' },
+            { label: 'BLOCKED', val: blocked, color: '#ff1744' },
+            { label: 'PRE-BLOCKED', val: muts, color: '#d500f9' },
+            { label: 'BYPASSES', val: bypasses, color: '#ffab00' },
             { label: 'DEFENSE RATE', val: `${blockRate}%`, color: '#00e676' },
             { label: 'AVG SOPH', val: `${sophAvg}/10`, color: sophAvg > 6 ? '#ff1744' : sophAvg > 4 ? '#ffab00' : '#00e676' },
             { label: 'CAMPAIGNS', val: campaignCount, color: '#ff6d00' },
@@ -305,9 +325,9 @@ export default function CommandCenter() {
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', letterSpacing: '0.15em', marginBottom: 7 }}>AI vs AI BATTLE</div>
               <ErrorBoundary label="AI BATTLE">
                 <BattleStatus
-                  redAtks={stats.total}
-                  blueBlocks={stats.blocked}
-                  redBypasses={stats.bypasses}
+                  redAtks={total}
+                  blueBlocks={blocked}
+                  redBypasses={bypasses}
                   tier={tier}
                 />
               </ErrorBoundary>
@@ -327,7 +347,7 @@ export default function CommandCenter() {
             {/* Mutation counter */}
             <div style={{ background: '#080d1c', border: '1px solid #1a2845', borderRadius: 8, padding: '10px 12px' }}>
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', letterSpacing: '0.15em', marginBottom: 5 }}>MUTATION ENGINE</div>
-              <div style={{ fontFamily: fonts.display, fontSize: 24, fontWeight: 700, color: '#d500f9', lineHeight: 1 }}>{stats.muts}</div>
+              <div style={{ fontFamily: fonts.display, fontSize: 24, fontWeight: 700, color: '#d500f9', lineHeight: 1 }}>{muts}</div>
               <div style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', marginTop: 3 }}>variants pre-blocked · zero human input</div>
             </div>
 
