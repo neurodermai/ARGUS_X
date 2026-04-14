@@ -6,7 +6,6 @@
 
 import { Component } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
-import { fonts } from '../theme';
 
 interface Props {
   /** Label shown in the fallback UI (e.g. "Neural Threat Map") */
@@ -29,7 +28,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Log to console — can be wired to Sentry/telemetry later
     console.error(
       `[ARGUS-X] ErrorBoundary caught crash${this.props.label ? ` in "${this.props.label}"` : ''}:`,
       error,
@@ -44,54 +42,17 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            minHeight: 60,
-            padding: '12px 16px',
-            background: 'rgba(255,23,68,0.04)',
-            border: '1px solid rgba(255,23,68,0.15)',
-            borderRadius: 6,
-          }}
-        >
-          <div
-            style={{
-              fontFamily: fonts.mono,
-              fontSize: 9,
-              color: '#ff1744',
-              letterSpacing: '0.12em',
-              marginBottom: 4,
-            }}
-          >
+        <div className="flex flex-col items-center justify-center h-full min-h-[60px] px-4 py-3 bg-[rgba(255,23,68,0.04)] border border-[rgba(255,23,68,0.15)] rounded-md">
+          <div className="font-mono text-[9px] text-argus-red tracking-[0.12em] mb-1">
             ⚠ {this.props.label ? `${this.props.label} ` : ''}OFFLINE
           </div>
-          <div
-            style={{
-              fontFamily: fonts.mono,
-              fontSize: 8,
-              color: '#3a5070',
-            }}
-          >
+          <div className="font-mono text-[8px] text-argus-muted">
             Component crashed — isolated from system
           </div>
           <button
             onClick={this.handleRetry}
-            style={{
-              marginTop: 8,
-              padding: '3px 12px',
-              background: 'transparent',
-              border: '1px solid #1a2845',
-              borderRadius: 4,
-              color: '#5a7090',
-              fontFamily: fonts.mono,
-              fontSize: 8,
-              cursor: 'pointer',
-              letterSpacing: '0.1em',
-            }}
+            className="mt-2 py-0.5 px-3 bg-transparent border border-argus-border rounded text-[#5a7090] font-mono text-[8px] cursor-pointer tracking-[0.1em] hover:border-argus-muted transition-colors"
+            aria-label="Retry loading component"
           >
             RETRY
           </button>

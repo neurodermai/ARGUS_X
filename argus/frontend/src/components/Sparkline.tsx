@@ -17,7 +17,7 @@ function SparklineInner({ data, color = '#00e5ff', height = 36 }: SparklineProps
     return `${x},${y}`;
   });
   return (
-    <svg width={w} height={height} viewBox={`0 0 ${w} ${height}`} style={{ display: 'block' }}>
+    <svg width={w} height={height} viewBox={`0 0 ${w} ${height}`} className="block">
       <polyline
         points={pts.join(' ')}
         fill="none"

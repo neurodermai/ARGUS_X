@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { fonts } from '../theme';
 import { THREAT_COLORS } from '../constants';
 import { SophMeter } from './SophMeter';
 import type { AttackEvent } from '../types';
@@ -14,24 +13,13 @@ function FeedItemInner({ attack }: FeedItemProps) {
   const actionColor = attack.blocked ? '#ff1744' : '#ffab00';
   return (
     <div
-      style={{
-        padding: '7px 10px',
-        borderRadius: 5,
-        background: '#080c1a',
-        border: '1px solid #1a2845',
-        borderLeft: `2px solid ${color}`,
-        animation: 'slideLeft 0.25s cubic-bezier(.22,1,.36,1)',
-        flexShrink: 0,
-      }}
+      className="py-[7px] px-2.5 rounded-[5px] bg-[#080c1a] border border-argus-border animate-slide-left shrink-0"
+      style={{ borderLeft: `2px solid ${color}` }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+      <div className="flex items-center gap-1.5 mb-0.5">
         <div
+          className="py-px px-1.5 rounded-[3px] font-mono text-[8px] font-bold"
           style={{
-            padding: '1px 6px',
-            borderRadius: 3,
-            fontFamily: fonts.mono,
-            fontSize: 8,
-            fontWeight: 700,
             background: `${actionColor}18`,
             color: actionColor,
             border: `1px solid ${actionColor}30`,
@@ -39,36 +27,20 @@ function FeedItemInner({ attack }: FeedItemProps) {
         >
           {action}
         </div>
-        <div style={{ fontFamily: fonts.mono, fontSize: 8, color }}>
+        <div className="font-mono text-[8px]" style={{ color }}>
           {attack.type.replace(/_/g, ' ')}
         </div>
-        <div
-          style={{
-            marginLeft: 'auto',
-            fontFamily: fonts.mono,
-            fontSize: 8,
-            color: '#2a4060',
-          }}
-        >
+        <div className="ml-auto font-mono text-[8px] text-argus-dim">
           {attack.latency}ms
         </div>
       </div>
-      <div
-        style={{
-          fontFamily: fonts.mono,
-          fontSize: 9,
-          color: '#4a6080',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
+      <div className="font-mono text-[9px] text-[#4a6080] whitespace-nowrap overflow-hidden text-ellipsis">
         {attack.text.slice(0, 58)}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+      <div className="flex items-center gap-1.5 mt-1">
         <SophMeter score={attack.soph} />
         {attack.muts > 0 && (
-          <span style={{ fontFamily: fonts.mono, fontSize: 8, color: '#4a1a80' }}>
+          <span className="font-mono text-[8px] text-[#4a1a80]">
             +{attack.muts} variants
           </span>
         )}

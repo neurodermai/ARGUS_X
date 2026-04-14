@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { fonts } from '../theme';
 
 interface ThreatLevelBarProps {
   level: number;
@@ -13,24 +12,20 @@ function ThreatLevelBarInner({ level }: ThreatLevelBarProps) {
   const pct = ((level + 1) / 6) * 100;
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-        <span
-          style={{ fontFamily: fonts.mono, fontSize: 8, color: '#3a5070', letterSpacing: '0.15em' }}
-        >
+      <div className="flex justify-between mb-1.5">
+        <span className="font-mono text-[8px] text-argus-muted tracking-[0.15em]">
           THREAT LEVEL
         </span>
-        <span style={{ fontFamily: fonts.mono, fontSize: 9, fontWeight: 700, color: LEVEL_COLORS[idx] }}>
+        <span className="font-mono text-[9px] font-bold" style={{ color: LEVEL_COLORS[idx] }}>
           {LEVELS[idx]}
         </span>
       </div>
-      <div style={{ height: 4, background: '#0d1830', borderRadius: 2, overflow: 'hidden' }}>
+      <div className="h-1 bg-argus-input rounded-sm overflow-hidden">
         <div
+          className="h-full rounded-sm transition-all duration-1000"
           style={{
-            height: '100%',
             width: `${pct}%`,
             background: LEVEL_COLORS[idx],
-            borderRadius: 2,
-            transition: 'width 1s ease, background 1s ease',
             boxShadow: `0 0 8px ${LEVEL_COLORS[idx]}66`,
           }}
         />

@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { fonts } from '../theme';
 import type { AlertEntry } from '../types';
 
 interface CampaignAlertProps {
@@ -20,30 +19,17 @@ function CampaignAlertInner({
   if (showAlert) {
     return (
       <div
-        style={{
-          position: 'absolute', top: 60, right: 16, zIndex: 100,
-          background: 'rgba(6,10,20,0.97)', border: '1px solid #ff1744',
-          borderRadius: 8, padding: '12px 16px', maxWidth: 300,
-          boxShadow: '0 0 24px rgba(255,23,68,0.3)',
-          animation: 'slideInAlert 0.4s cubic-bezier(.22,1,.36,1)',
-        }}
+        className="absolute top-[60px] right-4 z-[100] bg-[rgba(6,10,20,0.97)] border border-argus-red rounded-lg px-4 py-3 max-w-[300px] animate-slide-alert"
+        style={{ boxShadow: '0 0 24px rgba(255,23,68,0.3)' }}
+        role="alert"
       >
-        <div
-          style={{
-            fontFamily: fonts.mono, fontSize: 9, color: '#ff1744',
-            letterSpacing: '0.2em', marginBottom: 5,
-          }}
-        >
+        <div className="font-mono text-[9px] text-argus-red tracking-[0.2em] mb-1.5">
           ⚠ CAMPAIGN DETECTED
         </div>
-        <div
-          style={{
-            fontFamily: fonts.mono, fontSize: 10, color: '#c0d0e0', lineHeight: 1.6,
-          }}
-        >
+        <div className="font-mono text-[10px] text-[#c0d0e0] leading-relaxed">
           {alertMsg}
         </div>
-        <div style={{ marginTop: 6, fontFamily: fonts.mono, fontSize: 8, color: '#5a7090' }}>
+        <div className="mt-1.5 font-mono text-[8px] text-[#5a7090]">
           Correlator flagged · Auto-escalated
         </div>
       </div>
@@ -53,35 +39,27 @@ function CampaignAlertInner({
   if (alertHistory.length === 0) return null;
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 16, zIndex: 90 }}>
-      <div
+    <div className="absolute top-[60px] right-4 z-[90]">
+      <button
         onClick={onToggleHistory}
-        style={{
-          fontFamily: fonts.mono, fontSize: 8, color: '#ff6d00',
-          cursor: 'pointer', letterSpacing: '0.1em', padding: '4px 10px',
-          background: 'rgba(6,10,20,0.9)', border: '1px solid #331500', borderRadius: 6,
-        }}
+        className="font-mono text-[8px] text-argus-orange cursor-pointer tracking-[0.1em] py-1 px-2.5 bg-[rgba(6,10,20,0.9)] border border-[#331500] rounded-md hover:bg-[rgba(6,10,20,1)] transition-colors"
+        aria-expanded={showAlertHistory}
+        aria-label={`${alertHistory.length} campaign alerts`}
       >
         ⚠ {alertHistory.length} CAMPAIGN{alertHistory.length > 1 ? 'S' : ''} ·{' '}
         {showAlertHistory ? 'HIDE' : 'SHOW'}
-      </div>
+      </button>
       {showAlertHistory && (
-        <div
-          style={{
-            marginTop: 4, background: 'rgba(6,10,20,0.97)', border: '1px solid #331500',
-            borderRadius: 6, padding: '8px 10px', maxWidth: 300, maxHeight: 200, overflowY: 'auto',
-          }}
-        >
+        <div className="mt-1 bg-[rgba(6,10,20,0.97)] border border-[#331500] rounded-md px-2.5 py-2 max-w-[300px] max-h-[200px] overflow-y-auto">
           {alertHistory.map((a, i) => (
             <div
               key={i}
+              className="font-mono text-[9px] text-[#7a8a9a] leading-[1.7] py-0.5"
               style={{
-                fontFamily: fonts.mono, fontSize: 9, color: '#7a8a9a', lineHeight: 1.7,
                 borderBottom: i < alertHistory.length - 1 ? '1px solid #1a2030' : 'none',
-                padding: '3px 0',
               }}
             >
-              <span style={{ color: '#5a4030' }}>[{a.ts}]</span> {a.msg}
+              <span className="text-[#5a4030]">[{a.ts}]</span> {a.msg}
             </div>
           ))}
         </div>
