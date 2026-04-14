@@ -98,7 +98,7 @@ def _sanitize_response(text: str) -> str:
 
 
 @router.post("/chat", response_model=ChatResponse)
-@_rate_limit("20/minute")
+@_rate_limit("30/minute")
 async def chat(req: ChatRequest, request: Request):
     t0 = time.perf_counter()
     app = request.app

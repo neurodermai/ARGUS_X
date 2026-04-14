@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { THREAT_COLORS } from '../constants';
 import type { AttackEvent } from '../types';
 
@@ -16,16 +16,35 @@ interface ClusterNode {
 }
 
 export function MiniClusterMap({ attacks }: MiniClusterMapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const nodesRef = useRef<Record<string, ClusterNode>>({});
+  const [size, setSize] = useState({ width: 180, height: 120 });
+
+  // Responsive sizing via ResizeObserver
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const update = () => {
+      const { width, height } = container.getBoundingClientRect();
+      if (width > 0 && height > 0)
+        setSize({ width: Math.round(width), height: Math.round(height) });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const W = canvas.width,
-      H = canvas.height;
+    const W = size.width,
+      H = size.height;
+
+    const MAX_NODES = 80;
 
     const centers: Record<string, { x: number; y: number }> = {
       INSTRUCTION_OVERRIDE: { x: W * 0.2, y: H * 0.3 },
@@ -61,6 +80,15 @@ export function MiniClusterMap({ attacks }: MiniClusterMapProps) {
     Object.keys(nodesRef.current).forEach((id) => {
       if (!activeIds.has(id)) delete nodesRef.current[id];
     });
+
+    // Hard cap: evict oldest nodes if over limit to prevent memory leak
+    const allKeys = Object.keys(nodesRef.current);
+    if (allKeys.length > MAX_NODES) {
+      const toEvict = allKeys.slice(0, allKeys.length - MAX_NODES);
+      for (const id of toEvict) {
+        delete nodesRef.current[id];
+      }
+    }
 
     let animId: number;
     function draw() {
@@ -98,14 +126,17 @@ export function MiniClusterMap({ attacks }: MiniClusterMapProps) {
     }
     draw();
     return () => cancelAnimationFrame(animId);
-  }, [attacks]);
+  }, [attacks, size]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={180}
-      height={120}
-      style={{ display: 'block', borderRadius: 6 }}
-    />
+    <div ref={containerRef} style={{ width: '100%', height: 120, minHeight: 80 }}>
+      <canvas
+        ref={canvasRef}
+        width={size.width}
+        height={size.height}
+        style={{ display: 'block', borderRadius: 6, width: '100%', height: '100%' }}
+      />
+    </div>
   );
 }
+
