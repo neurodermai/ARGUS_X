@@ -6,6 +6,8 @@ Mutation → XAI → Evolution → Clustering → Correlation → Supabase Realt
 import os
 import time
 import uuid
+import hashlib
+import html
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Request
@@ -61,12 +63,19 @@ def _build_event(user_id, session_id, message, action, threat_type,
                  score, layer, latency, method, sophistication=0,
                  fingerprint=None, mutations=0, explanation=None,
                  session_threat_level="LOW"):
+    # SECURITY: Never expose raw attack payloads in event previews.
+    # CLEAN events are safe to preview (benign input); threats are redacted.
+    if action in ("BLOCKED", "SANITIZED"):
+        preview = hashlib.sha256(message.encode()).hexdigest()[:16] + " [REDACTED]"
+    else:
+        preview = (message[:115] + "…") if len(message) > 115 else message
+
     return {
         "id":                    str(uuid.uuid4())[:8],
         "ts":                    datetime.utcnow().isoformat() + "Z",
         "user_id":               user_id,
         "session_id":            session_id,
-        "preview":               (message[:115] + "…") if len(message) > 115 else message,
+        "preview":               preview,
         "action":                action,
         "threat_type":           threat_type,
         "score":                 round(score, 4),
@@ -79,6 +88,13 @@ def _build_event(user_id, session_id, message, action, threat_type,
         "explanation":           explanation,
         "session_threat_level":  session_threat_level,
     }
+
+
+def _sanitize_response(text: str) -> str:
+    """SECURITY: HTML-escape LLM output to prevent stored XSS.
+    LLM output is untrusted — it may contain <script>, <img onerror>,
+    or other HTML that would execute in the browser if rendered."""
+    return html.escape(text, quote=True)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -106,7 +122,7 @@ async def chat(req: ChatRequest, request: Request):
         )
         await app.state.db.log_event(ev)
         return ChatResponse(
-            response=raw, blocked=False, sanitized=False,
+            response=_sanitize_response(raw), blocked=False, sanitized=False,
             threat_score=0, threat_type=None, threat_layer=None,
             sophistication_score=0, attack_fingerprint=None,
             mutations_preblocked=0, session_threat_level="LOW",
@@ -223,7 +239,7 @@ async def chat(req: ChatRequest, request: Request):
         app.state.correlator.ingest_event(ev)
 
         return ChatResponse(
-            response=audit["sanitized_response"], blocked=False, sanitized=True,
+            response=_sanitize_response(audit["sanitized_response"]), blocked=False, sanitized=True,
             threat_score=audit["confidence"], threat_type=audit["flag_reason"],
             threat_layer="OUTPUT", sophistication_score=0,
             attack_fingerprint=None, mutations_preblocked=0,
@@ -242,7 +258,7 @@ async def chat(req: ChatRequest, request: Request):
     await app.state.broadcast(app, "clean", ev)
 
     return ChatResponse(
-        response=llm_response, blocked=False, sanitized=False,
+        response=_sanitize_response(llm_response), blocked=False, sanitized=False,
         threat_score=fw["score"], threat_type=None, threat_layer=None,
         sophistication_score=0, attack_fingerprint=None, mutations_preblocked=0,
         session_threat_level=session_level, explanation=None,

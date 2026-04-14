@@ -10,7 +10,8 @@ import { THREAT_COLORS } from '../constants';
 import { API_URL } from '../utils/config';
 
 interface BypassEntry {
-  before: string;
+  before_hash: string;
+  before_preview: string;
   type: string;
   tier: number;
   score: number;
@@ -243,7 +244,7 @@ export const BypassHistory = memo(function BypassHistory() {
                       lineHeight: 1.4,
                     }}
                   >
-                    {entry.before}
+                    {entry.before_preview}
                   </div>
                 </div>
                 <div>

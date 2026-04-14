@@ -105,12 +105,15 @@ class ThreatClusterer:
                     most_common = max(set(types), key=types.count)
                     avg_soph = sum(m["sophistication"] for m in members) / len(members)
                     
+                    # SECURITY: Never expose raw attack text — hash it
+                    sample_hash = hashlib.sha256(members[0]["text"].encode()).hexdigest()[:16]
                     self.clusters.append({
                         "cluster_id": f"C{label}",
                         "size": len(members),
                         "dominant_type": most_common,
                         "avg_sophistication": round(avg_soph, 1),
-                        "sample": members[0]["text"][:100],
+                        "sample_hash": sample_hash,
+                        "sample_preview": members[0]["text"][:20] + "[REDACTED]",
                         "types": list(set(types)),
                     })
                 
@@ -130,12 +133,16 @@ class ThreatClusterer:
         self.clusters = []
         for threat_type, members in groups.items():
             avg_soph = sum(m["sophistication"] for m in members) / max(len(members), 1)
+            # SECURITY: Never expose raw attack text — hash it
+            sample_text = members[-1]["text"] if members else ""
+            sample_hash = hashlib.sha256(sample_text.encode()).hexdigest()[:16] if sample_text else ""
             self.clusters.append({
                 "cluster_id": f"K-{threat_type[:8]}",
                 "size": len(members),
                 "dominant_type": threat_type,
                 "avg_sophistication": round(avg_soph, 1),
-                "sample": members[-1]["text"][:100] if members else "",
+                "sample_hash": sample_hash,
+                "sample_preview": (sample_text[:20] + "[REDACTED]") if sample_text else "",
                 "types": [threat_type],
             })
 
