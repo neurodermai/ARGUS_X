@@ -65,6 +65,7 @@ class RedTeamAgent:
         self.attacks_tried  = 0
         self.last_run  = None
         self.last_bypass: Optional[dict] = None
+        self.last_patch: Optional[dict] = None
         self.cycle_count = 0
         log.info("✅ Red Team Agent initialized")
 
@@ -76,6 +77,7 @@ class RedTeamAgent:
             "bypasses_found":self.bypasses_found,
             "last_run":      self.last_run,
             "cycle_count":   self.cycle_count,
+            "last_patch":    self.last_patch,
         }
 
     async def autonomous_loop(self):
@@ -150,6 +152,16 @@ class RedTeamAgent:
         text = attack["text"]
         # Add as dynamic rule with the identified threat type
         self.firewall.add_dynamic_rule(text, attack["type"])
+
+        # Record patch event for dashboard visualization
+        self.last_patch = {
+            "before": text[:200],
+            "type":   attack["type"],
+            "tier":   attack["tier"],
+            "after":  f"Dynamic rule added for {attack['type']} — pattern now blocked",
+            "ts":     datetime.utcnow().isoformat() + "Z",
+        }
+
         log.info(f"🔧 Auto-patched: {attack['type']} bypass added to dynamic rules")
 
     async def run_manual_cycle(self, attacks: List[dict]) -> List[dict]:

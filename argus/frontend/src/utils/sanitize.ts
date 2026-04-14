@@ -8,13 +8,31 @@ import type { AttackEvent, RawEvent } from '../types';
 import { uid } from './helpers';
 
 /**
- * Strip HTML angle brackets and null bytes from untrusted strings.
- * Defense-in-depth: React escapes JSX text, but this protects against
- * future dangerouslySetInnerHTML or innerHTML usage.
+ * Defense-in-depth text sanitizer for untrusted strings.
+ *
+ * PRIMARY XSS DEFENSE: React's JSX escaping. React automatically escapes
+ * all values embedded in JSX, preventing script injection. This function
+ * is NOT the primary defense — it is a secondary safety net.
+ *
+ * This helper strips:
+ *   - HTML angle brackets (< >)
+ *   - Null bytes
+ *   - Event handler patterns (onerror=, onload=, onclick=, etc.)
+ *   - javascript: / vbscript: / data: URI schemes
+ *
+ * WARNING: This does NOT make strings safe for dangerouslySetInnerHTML.
+ * Do NOT use dangerouslySetInnerHTML anywhere in the frontend.
+ * If HTML rendering is ever needed, use a proper allowlist sanitizer (e.g., DOMPurify).
  */
 export function sanitizeText(str: unknown): string {
   if (typeof str !== 'string') return '';
-  return str.replace(/[<>]/g, '').replace(/\0/g, '');
+  return str
+    .replace(/[\x00]/g, '')                          // null bytes
+    .replace(/[<>]/g, '')                            // angle brackets
+    .replace(/on\w+\s*=/gi, '')                      // event handlers (onerror=, onload=, etc.)
+    .replace(/javascript\s*:/gi, '')                 // javascript: URIs
+    .replace(/vbscript\s*:/gi, '')                   // vbscript: URIs
+    .replace(/data\s*:[^,]*;base64/gi, '');          // data: base64 URIs
 }
 
 /**

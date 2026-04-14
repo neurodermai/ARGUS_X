@@ -1,7 +1,9 @@
 """
 ARGUS-X — Supabase Client
-All database operations. Uses service_role key for writes, anon key for reads.
-CRITICAL: supabase-py is synchronous, so all writes use run_in_executor.
+All database operations. Uses dual-client architecture:
+  - _write_client (service role key) → bypasses RLS, writes only
+  - _read_client  (anon key)         → respects RLS, reads only
+CRITICAL: supabase-py is synchronous, so all calls use run_in_executor.
 """
 import os
 import asyncio
@@ -25,38 +27,53 @@ except ImportError:
 class SupabaseClient:
     """
     Wrapper around Supabase with async support via run_in_executor.
+    Enforces least-privilege access:
+      - _write_client: service role key (bypasses RLS) — INSERT/UPDATE/UPSERT/RPC only
+      - _read_client:  anon key (respects RLS) — SELECT only
     Gracefully degrades if Supabase is unavailable (logs warning, continues).
     """
 
     def __init__(self):
-        self.client: Optional[Any] = None
+        self._write_client: Optional[Any] = None
+        self._read_client: Optional[Any] = None
         self.available = False
-        
+
         url = os.getenv("SUPABASE_URL", "")
 
-        # ── Key resolution (service role key — full admin access) ─────────
-        # SECURITY: This key bypasses RLS. It must NEVER be exposed to
-        # frontend code, browser clients, logs, or error messages.
-        # Prefer SUPABASE_SERVICE_KEY; fall back to legacy SUPABASE_KEY.
-        key = os.getenv("SUPABASE_SERVICE_KEY", "")
-        if not key:
-            key = os.getenv("SUPABASE_KEY", "")
-            if key:
-                log.warning(
-                    "⚠️ SUPABASE_KEY is deprecated — rename to SUPABASE_SERVICE_KEY "
-                    "to make the privilege level explicit and prevent accidental exposure"
-                )
-        
-        if SUPABASE_AVAILABLE and url and key:
+        # ── Write client (service role key — full admin, bypasses RLS) ────
+        # SECURITY: This key must NEVER be exposed to frontend, logs, or
+        # error messages. Used exclusively for write operations.
+        service_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+
+        # ── Read client (anon key — respects RLS) ────────────────────────
+        # Safe for read operations. If leaked, RLS policies still protect data.
+        anon_key = os.getenv("SUPABASE_ANON_KEY", "")
+
+        if SUPABASE_AVAILABLE and url and service_key:
             try:
-                self.client = create_client(url, key)
+                self._write_client = create_client(url, service_key)
+                log.info("✅ Supabase write client connected (service role)")
+
+                if anon_key:
+                    self._read_client = create_client(url, anon_key)
+                    log.info("✅ Supabase read client connected (anon — RLS enforced)")
+                else:
+                    # Graceful degradation: use write client for reads in dev/demo
+                    self._read_client = self._write_client
+                    log.warning(
+                        "⚠️ SUPABASE_ANON_KEY not set — reads will use service role key "
+                        "(RLS bypassed). Set SUPABASE_ANON_KEY for production security."
+                    )
+
                 self.available = True
-                log.info("✅ Supabase connected (service role)")
             except Exception as e:
                 log.warning(f"⚠️ Supabase connection failed: {e} — running in memory-only mode")
         else:
-            log.warning("⚠️ Supabase credentials not set — running in memory-only mode")
-        
+            if SUPABASE_AVAILABLE and url and not service_key:
+                log.warning("⚠️ SUPABASE_SERVICE_KEY not set — running in memory-only mode")
+            else:
+                log.warning("⚠️ Supabase credentials not set — running in memory-only mode")
+
         # In-memory fallback storage
         self._memory_events: List[dict] = []
         self._memory_stats = {
@@ -95,7 +112,7 @@ class SupabaseClient:
                     "explanation":          event.get("explanation"),
                 }
                 await self._run_sync(
-                    lambda: self.client.table("events").insert(row).execute()
+                    lambda: self._write_client.table("events").insert(row).execute()
                 )
             else:
                 self._memory_events.append(event)
@@ -110,7 +127,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("events")
+                    lambda: self._read_client.table("events")
                         .select("*")
                         .order("created_at", desc=True)
                         .limit(limit)
@@ -143,7 +160,7 @@ class SupabaseClient:
         try:
             if self.available:
                 await self._run_sync(
-                    lambda: self.client.rpc("increment_stat", {"col_name": column}).execute()
+                    lambda: self._write_client.rpc("increment_stat", {"col_name": column}).execute()
                 )
             else:
                 if column in self._memory_stats:
@@ -160,7 +177,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("stats").select("*").eq("id", 1).execute()
+                    lambda: self._read_client.table("stats").select("*").eq("id", 1).execute()
                 )
                 if result.data:
                     return result.data[0]
@@ -186,10 +203,28 @@ class SupabaseClient:
                     "latency_ms":   result.get("latency_ms", 0),
                 }
                 await self._run_sync(
-                    lambda: self.client.table("red_team_sessions").insert(row).execute()
+                    lambda: self._write_client.table("red_team_sessions").insert(row).execute()
                 )
         except Exception as e:
             log.warning(f"Red team log failed: {e}")
+
+    async def get_bypass_history(self, limit: int = 10) -> list:
+        """Get recent auto-patched bypasses for dashboard display."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self._read_client.table("red_team_sessions")
+                        .select("attack_text,attack_type,tier,score,cycle,created_at")
+                        .eq("bypassed", True)
+                        .eq("auto_patched", True)
+                        .order("created_at", desc=True)
+                        .limit(limit)
+                        .execute()
+                )
+                return result.data if result.data else []
+        except Exception as e:
+            log.warning(f"Bypass history fetch failed: {e}")
+        return []
 
     # ── Campaigns ─────────────────────────────────────────────────────────────
 
@@ -209,7 +244,7 @@ class SupabaseClient:
                     "status":          campaign.get("status", "ACTIVE"),
                 }
                 await self._run_sync(
-                    lambda: self.client.table("campaigns").insert(row).execute()
+                    lambda: self._write_client.table("campaigns").insert(row).execute()
                 )
                 await self.increment_stat("campaigns_detected")
         except Exception as e:
@@ -234,7 +269,7 @@ class SupabaseClient:
                     "confidence_breakdown": json.dumps(decision.get("confidence_breakdown", {})),
                 }
                 await self._run_sync(
-                    lambda: self.client.table("xai_decisions").insert(row).execute()
+                    lambda: self._write_client.table("xai_decisions").insert(row).execute()
                 )
         except Exception as e:
             log.warning(f"XAI decision log failed: {e}")
@@ -260,7 +295,7 @@ class SupabaseClient:
                     "last_update": state.get("last_update"),
                 }
                 await self._run_sync(
-                    lambda: self.client.table("battle_state").upsert(row).execute()
+                    lambda: self._write_client.table("battle_state").upsert(row).execute()
                 )
         except Exception as e:
             log.warning(f"Battle state update failed: {e}")
@@ -270,7 +305,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("battle_state").select("*").eq("id", 1).execute()
+                    lambda: self._read_client.table("battle_state").select("*").eq("id", 1).execute()
                 )
                 if result.data:
                     return result.data[0]
@@ -285,7 +320,7 @@ class SupabaseClient:
         try:
             if self.available:
                 await self._run_sync(
-                    lambda: self.client.table("dynamic_rules").insert({
+                    lambda: self._write_client.table("dynamic_rules").insert({
                         "pattern": pattern[:500],
                         "threat_type": threat_type,
                         "source": source,
@@ -300,7 +335,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("dynamic_rules")
+                    lambda: self._read_client.table("dynamic_rules")
                         .select("*")
                         .eq("active", True)
                         .execute()
@@ -317,7 +352,7 @@ class SupabaseClient:
         try:
             if self.available:
                 await self._run_sync(
-                    lambda: self.client.rpc("upsert_fingerprint", {
+                    lambda: self._write_client.rpc("upsert_fingerprint", {
                         "p_fingerprint_id": fp_id,
                         "p_threat_type": threat_type,
                         "p_sophistication": sophistication,
@@ -334,7 +369,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("threat_summary").select("*").execute()
+                    lambda: self._read_client.table("threat_summary").select("*").execute()
                 )
                 return result.data if result.data else []
         except Exception as e:
@@ -346,7 +381,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("attack_heatmap").select("*").execute()
+                    lambda: self._read_client.table("attack_heatmap").select("*").execute()
                 )
                 return result.data if result.data else []
         except Exception as e:
@@ -358,7 +393,7 @@ class SupabaseClient:
         try:
             if self.available:
                 result = await self._run_sync(
-                    lambda: self.client.table("xai_decisions")
+                    lambda: self._read_client.table("xai_decisions")
                         .select("*")
                         .order("created_at", desc=True)
                         .limit(limit)
@@ -367,4 +402,20 @@ class SupabaseClient:
                 return result.data if result.data else []
         except Exception as e:
             log.warning(f"XAI decisions fetch failed: {e}")
+        return []
+
+    async def get_battle_history(self, limit: int = 20) -> list:
+        """Get recent battle ticks from database (read-only, RLS-respecting)."""
+        try:
+            if self.available:
+                result = await self._run_sync(
+                    lambda: self._read_client.table("battle_state")
+                        .select("*")
+                        .order("last_update", desc=True)
+                        .limit(limit)
+                        .execute()
+                )
+                return result.data if result.data else []
+        except Exception as e:
+            log.warning(f"Battle history fetch failed: {e}")
         return []

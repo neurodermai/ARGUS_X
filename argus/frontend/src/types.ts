@@ -61,7 +61,7 @@ export interface RawEvent {
 
 /** Raw WebSocket message wrapper */
 export interface WSMessage {
-  type: 'history' | 'attack' | 'sanitized' | 'clean' | 'ping';
-  data?: RawEvent;
+  type: 'history' | 'attack' | 'sanitized' | 'clean' | 'ping' | 'campaign';
+  data?: RawEvent | Record<string, unknown>;
   ts?: string;
 }

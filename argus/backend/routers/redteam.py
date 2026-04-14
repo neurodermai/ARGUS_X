@@ -1,8 +1,12 @@
 """
 ARGUS-X — Red Team Router
 Manual attack testing endpoint for the dashboard console.
+SECURITY: This endpoint is compute-heavy (firewall + fingerprint + mutation + XAI).
+  - Strict rate limit: 5/minute (vs 20/minute for /chat)
+  - Optional X-RedTeam-Token header protection (env-based)
 """
-from fastapi import APIRouter, Request
+import os
+from fastapi import APIRouter, Request, Header, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
@@ -23,6 +27,12 @@ def _rate_limit(limit_string: str):
         return limiter.limit(limit_string)
     return lambda f: f
 
+
+# ── Red Team Token Protection ────────────────────────────────────────────
+# When REDTEAM_TOKEN is set, callers must send X-RedTeam-Token header.
+# When empty (dev/demo), access is open (same pattern as API_KEY).
+_REDTEAM_TOKEN = os.getenv("REDTEAM_TOKEN", "")
+
 router = APIRouter()
 
 
@@ -33,12 +43,20 @@ class RedTeamRequest(BaseModel):
 
 
 @router.post("/redteam")
-@_rate_limit("30/minute")
-async def redteam_test(req: RedTeamRequest, request: Request):
+@_rate_limit("5/minute")
+async def redteam_test(
+    req: RedTeamRequest,
+    request: Request,
+    x_redteam_token: Optional[str] = Header(None),
+):
     """
     Manual red team test — run an attack against the live firewall.
     Returns detailed security analysis without going through LLM.
     """
+    # ── Token gate (when REDTEAM_TOKEN is configured) ────────────────
+    if _REDTEAM_TOKEN and x_redteam_token != _REDTEAM_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-RedTeam-Token")
+
     t0 = time.perf_counter()
     app = request.app
 
@@ -90,4 +108,36 @@ async def redteam_test(req: RedTeamRequest, request: Request):
         "mutations_preblocked": mutations,
         "xai": xai,
         "latency_ms": round(elapsed, 1),
+    }
+
+
+@router.get("/redteam/bypass-history")
+async def get_bypass_history(request: Request, limit: int = 10):
+    """
+    Get recent auto-patched bypasses — shows system learning over time.
+    Returns last N bypasses with: payload, type, tier, timestamp, and patch result.
+    """
+    app = request.app
+    db_results = await app.state.db.get_bypass_history(min(limit, 50))
+
+    # Enrich each entry with patch context
+    entries = []
+    for row in db_results:
+        entries.append({
+            "before": row.get("attack_text", ""),
+            "type": row.get("attack_type", "UNKNOWN"),
+            "tier": row.get("tier", 1),
+            "score": row.get("score", 0),
+            "cycle": row.get("cycle", 0),
+            "after": f"Dynamic rule added for {row.get('attack_type', 'UNKNOWN')} — pattern now blocked",
+            "ts": row.get("created_at", ""),
+        })
+
+    # Include latest in-memory patch (may not be in DB yet)
+    last_patch = app.state.red_agent.last_patch
+
+    return {
+        "bypasses": entries,
+        "count": len(entries),
+        "last_patch": last_patch,
     }

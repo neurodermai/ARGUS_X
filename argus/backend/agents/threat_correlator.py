@@ -32,6 +32,7 @@ class ThreatCorrelator:
     def __init__(self, db):
         self.db = db
         self.running = False
+        self._broadcast = None  # Set by main.py after lifespan init
         
         # In-memory sliding windows
         self.threat_window: List[dict] = []  # Last 1000 threats
@@ -154,6 +155,13 @@ class ThreatCorrelator:
                         self.active_campaigns.append(campaign)
                         await self.db.log_campaign(campaign)
                         log.warning(f"⚠️  CAMPAIGN DETECTED: {threat_type} | {unique_users} users | {len(events)} events")
+
+                        # Push to dashboard instantly via WebSocket
+                        if self._broadcast:
+                            try:
+                                await self._broadcast(campaign)
+                            except Exception as e:
+                                log.warning(f"Campaign broadcast failed: {e}")
 
     def get_active_campaigns(self) -> List[dict]:
         return [c for c in self.active_campaigns if c["status"] == "ACTIVE"]
