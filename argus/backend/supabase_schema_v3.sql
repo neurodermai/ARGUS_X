@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS dynamic_rules (
   created_at    TIMESTAMPTZ  DEFAULT NOW(),
   pattern       TEXT         NOT NULL UNIQUE,
   threat_type   TEXT,
-  source        TEXT         CHECK (source IN ('MUTATION_ENGINE','RED_TEAM_AGENT','MANUAL')),
+  source        TEXT         CHECK (source IN ('MUTATION_ENGINE','RED_TEAM_AGENT','RED_AGENT_PATCH','MANUAL')),
   active        BOOLEAN      DEFAULT true,
   trigger_count INTEGER      DEFAULT 0
 );
