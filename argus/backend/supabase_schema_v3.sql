@@ -201,14 +201,23 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
 );
 
 -- ── ROW LEVEL SECURITY ────────────────────────────────────────────────────
--- SECURITY: Every table has RLS enabled. Policies enforce least-privilege:
---   • anon key  → limited SELECT on dashboard-safe tables only
---   • service_role → full access (bypasses RLS by default, but explicit
---     policies ensure defense-in-depth if bypass is misconfigured)
+-- SECURITY: Every table has RLS enabled. In Supabase:
+--   • anon key  → subject to RLS policies. Only tables with explicit
+--     "TO anon" SELECT policies are readable.
+--   • service_role → BYPASSES RLS entirely (Supabase built-in behavior).
+--     Write policies below are defense-in-depth only — they document intent
+--     but do NOT enforce anything for service_role.
+--
+-- ACCESS MODEL:
+--   READABLE BY ANON:  stats, battle_state, evolution_log, campaigns,
+--                       attack_fingerprints, xai_decisions, threat_clusters
+--   BLOCKED FOR ANON:  events (use events_safe view), red_team_sessions,
+--                       dynamic_rules, knowledge_base
+--     (no anon SELECT policy = RLS denies all reads)
 --
 -- CRITICAL: Sensitive tables (red_team_sessions, dynamic_rules,
--- knowledge_base) are NEVER readable by anon. They contain raw attack
--- payloads and firewall patterns that attackers could harvest.
+-- knowledge_base) are NEVER readable by anon. They contain attack
+-- intelligence that adversaries could harvest.
 
 ALTER TABLE events              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stats               ENABLE ROW LEVEL SECURITY;

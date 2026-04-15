@@ -13,6 +13,12 @@ from agents.red_team_agent import SEED_ATTACKS
 
 log = logging.getLogger("argus.battle_engine")
 
+# Tier-to-strategy mapping
+_TIER_STRATEGY = {
+    1: "NAIVE", 2: "INDIRECT", 3: "OBFUSCATED",
+    4: "MULTI_STEP", 5: "ADVERSARIAL",
+}
+
 
 class BattleEngine:
     """
@@ -63,10 +69,19 @@ class BattleEngine:
         self.tick += 1
         self.state["tick"] = self.tick
 
-        # Red agent selects and tries attacks
-        batch = random.sample(SEED_ATTACKS, min(5, len(SEED_ATTACKS)))
-        
+        # Update tier based on cycle count
+        tier = min(5, 1 + (self.tick // 10))
+        self.state["red_tier"] = tier
+        self.state["red_strategy"] = _TIER_STRATEGY.get(tier, "UNKNOWN")
+
+        # Red agent generates attacks filtered to current tier (escalation-aware)
+        eligible = [a for a in SEED_ATTACKS if a.get("tier", 1) <= tier]
+        batch = random.sample(eligible, min(5, len(eligible)))
+
         for attack in batch:
+            # Red agent tries the attack through the live firewall
+            red_result = await self.red_agent._try_attack(attack)
+
             # Blue agent defends
             defense = await self.blue_agent.defend(attack["text"], attack["type"])
             
@@ -81,14 +96,6 @@ class BattleEngine:
                 self.state["battle_score"]["red"] += 1
                 if defense.get("auto_patched"):
                     self.state["blue_auto_patches"] += 1
-
-        # Update tier based on cycle count
-        tier = min(5, 1 + (self.tick // 10))
-        self.state["red_tier"] = tier
-        self.state["red_strategy"] = {
-            1: "NAIVE", 2: "INDIRECT", 3: "OBFUSCATED",
-            4: "MULTI_STEP", 5: "ADVERSARIAL"
-        }.get(tier, "UNKNOWN")
         
         self.state["last_update"] = datetime.utcnow().isoformat() + "Z"
 

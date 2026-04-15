@@ -42,8 +42,9 @@ OBFUSCATION_MAP = {
 }
 
 class SemanticMutationEngine:
-    def __init__(self, models=None):
+    def __init__(self, models=None, db=None):
         self.models    = models
+        self.db        = db
         self.preblocked: Dict[str, set] = {}  # fingerprint_id -> set of blocked variants
         log.info("✅ Semantic Mutation Engine initialized")
 
@@ -63,6 +64,9 @@ class SemanticMutationEngine:
             if not fw_result["blocked"]:
                 # This variant would have bypassed — add it
                 firewall.add_dynamic_rule(variant, threat_type)
+                # Persist to DB so the rule survives restarts
+                if self.db:
+                    await self.db.add_dynamic_rule(variant, threat_type, source="MUTATION_ENGINE")
                 new_blocks += 1
 
         log.info(f"Mutation engine: {new_blocks}/{len(variants)} new variants pre-blocked for {threat_type}")

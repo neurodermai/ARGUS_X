@@ -53,7 +53,10 @@ class OutputAuditor:
         policy_results = self._scan_policy(llm_output)
         
         # ── Determine verdict ─────────────────────────────────────────────
-        all_findings = pii_results + policy_results
+        # Apply severity threshold: only flag findings with severity >= 0.75
+        # This prevents false positives from low-severity matches like
+        # benign IP addresses (severity 0.60) in normal LLM output.
+        all_findings = [f for f in (pii_results + policy_results) if f["severity"] >= 0.75]
         
         if not all_findings:
             return {

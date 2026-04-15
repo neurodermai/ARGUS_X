@@ -163,7 +163,7 @@ class ServiceContainer:
         self.register("correlator", ThreatCorrelator(db))
 
         # L4: Mutation Engine
-        self.register("mutator", SemanticMutationEngine(models))
+        self.register("mutator", SemanticMutationEngine(models, db=db))
 
         # L5: AI vs AI Battle
         red = RedTeamAgent(db, self.firewall, self.correlator)
@@ -173,8 +173,8 @@ class ServiceContainer:
         self.register("battle", BattleEngine(red, blue, db))
 
         # L6: Learning Layer
-        self.register("evolution", EvolutionTracker())
-        self.register("clusterer", ThreatClusterer(models))
+        self.register("evolution", EvolutionTracker(db=db))
+        self.register("clusterer", ThreatClusterer(models, db=db))
 
         # L7: XAI Engine
         self.register("xai", XAIEngine())

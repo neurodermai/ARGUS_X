@@ -12,7 +12,7 @@ import time
 log = logging.getLogger("argus.session_store")
 
 # Default empty session shape
-_DEFAULT_SESSION = {"total": 0, "threats": 0, "last_score": 0, "escalation": 0, "user_id": ""}
+_DEFAULT_SESSION = {"total": 0, "threats": 0, "last_score": 0, "last_threat_score": 0, "escalation": 0, "user_id": ""}
 
 # Session TTL: 24 hours (seconds)
 SESSION_TTL = 86400
@@ -99,8 +99,9 @@ class SessionStore:
                         session["total"] += 1
                         if action in ("BLOCKED", "SANITIZED"):
                             session["threats"] += 1
-                            if score > session["last_score"]:
+                            if score > session["last_threat_score"]:
                                 session["escalation"] += 1
+                            session["last_threat_score"] = score
                         session["last_score"] = score
 
                         pipe = self._redis.pipeline()
@@ -137,8 +138,9 @@ class SessionStore:
                 session["total"] += 1
                 if action in ("BLOCKED", "SANITIZED"):
                     session["threats"] += 1
-                    if score > session["last_score"]:
+                    if score > session["last_threat_score"]:
                         session["escalation"] += 1
+                    session["last_threat_score"] = score
                 session["last_score"] = score
 
                 self._memory[session_id] = (session, time.monotonic() + SESSION_TTL)

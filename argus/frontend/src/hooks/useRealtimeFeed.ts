@@ -1,16 +1,33 @@
-// ═══════════════════════════════════════════════════════════════════════
-// ARGUS-X — useRealtimeFeed Hook
-// WebSocket connection to /ws/live with reconnection + event normalization
-// State is pushed into Zustand store (no local state)
-// ═══════════════════════════════════════════════════════════════════════
-
 import { useEffect } from 'react';
 import type { WSMessage, LogEntry } from '../types';
-import { WS_URL } from '../utils/config';
+import { WS_URL, API_URL } from '../utils/config';
 import { normalizeEvent } from '../utils/sanitize';
 import { uid } from '../utils/helpers';
 import { getApiKey } from '../utils/apiKey';
 import { useArgusStore } from '../store/useArgusStore';
+
+/**
+ * Fetch a short-lived WS auth token from the backend.
+ * Falls back to the raw API key if the endpoint is unavailable.
+ * SECURITY: Prevents permanent API keys from appearing in WS frames.
+ */
+async function getWsToken(): Promise<string> {
+  const apiKey = getApiKey();
+  if (!apiKey) return '';
+  try {
+    const res = await fetch(`${API_URL}/api/v1/ws-token`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.token || apiKey;
+    }
+  } catch {
+    /* fallback to raw key */
+  }
+  return apiKey;
+}
 
 /**
  * Manages the WebSocket connection lifecycle.
@@ -34,7 +51,9 @@ export function useRealtimeFeed(): void {
       setCampaignWsAlert,
     } = store();
 
-    function connect() {
+    async function connect() {
+      // SECURITY: Get a short-lived token BEFORE connecting
+      const wsToken = await getWsToken();
       try {
         // SECURITY: No token in URL — auth is sent after connection
         ws = new WebSocket(`${WS_URL}/ws/live`);
@@ -44,9 +63,9 @@ export function useRealtimeFeed(): void {
 
       ws.onopen = () => {
         // Send auth message as first frame (auth-after-connect protocol)
-        const apiKey = typeof window !== 'undefined' ? getApiKey() : '';
-        if (apiKey) {
-          ws!.send(JSON.stringify({ type: 'auth', token: apiKey }));
+        // Uses short-lived token instead of permanent API key
+        if (wsToken) {
+          ws!.send(JSON.stringify({ type: 'auth', token: wsToken }));
         }
         retries = 0;
         setConnected(true);
