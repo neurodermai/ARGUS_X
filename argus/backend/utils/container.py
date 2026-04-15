@@ -163,7 +163,7 @@ class ServiceContainer:
         self.register("correlator", ThreatCorrelator(db))
 
         # L4: Mutation Engine
-        self.register("mutator", SemanticMutationEngine(models))
+        self.register("mutator", SemanticMutationEngine(models, db=db))
 
         # L5: AI vs AI Battle
         red = RedTeamAgent(db, self.firewall, self.correlator)

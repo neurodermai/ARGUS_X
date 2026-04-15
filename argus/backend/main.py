@@ -14,9 +14,13 @@ All 9 layers wired:
   L9: Defense Command Center (frontend)
 """
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import logging
+import secrets
+import time as _time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -30,11 +34,22 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 # Rate limiting
+# SECURITY: Use API key for rate limiting when available; fallback to IP.
+# This prevents per-IP bypass via proxies/VPNs.
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
-    limiter = Limiter(key_func=get_remote_address)
+
+    def _rate_limit_key(request: Request) -> str:
+        """Rate limit by API key first, fallback to IP."""
+        api_key = request.headers.get("x-api-key", "")
+        if api_key:
+            # Hash the key so it's not stored in plaintext in rate limit backend
+            return "key:" + hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        return "ip:" + get_remote_address(request)
+
+    limiter = Limiter(key_func=_rate_limit_key)
     RATE_LIMIT_AVAILABLE = True
 except ImportError:
     limiter = None
@@ -211,6 +226,32 @@ async def limit_request_body(request: Request, call_next):
         )
     return await call_next(request)
 
+
+# ─── Security Headers ─────────────────────────────────────────────────────────
+# SECURITY: Harden all responses against XSS, clickjacking, and MIME-sniffing.
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # CSP: restrict script sources to same-origin only; block inline scripts.
+    # 'unsafe-inline' for styles is needed for CSS-in-JS (e.g., styled-components).
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self' wss: ws:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'"
+    )
+    return response
+
+
 # ─── Rate Limiting ────────────────────────────────────────────────────────────
 if RATE_LIMIT_AVAILABLE:
     app.state.limiter = limiter
@@ -234,14 +275,59 @@ app.include_router(benchmark.router, prefix="/api/v1", tags=["benchmark"], depen
 app.include_router(compliance.router, prefix="/api/v1", tags=["compliance"], dependencies=_auth)
 
 
+# ─── Short-Lived WebSocket Token ──────────────────────────────────────────────
+# SECURITY: Clients exchange their API key for a short-lived WS token via
+# POST /api/v1/ws-token. The token is an HMAC of a nonce + timestamp,
+# valid for WS_TOKEN_TTL seconds. This prevents permanent API keys from
+# appearing in WebSocket frames visible in browser devtools.
+WS_TOKEN_TTL = 60  # seconds
+_WS_TOKEN_SECRET = os.getenv("WS_TOKEN_SECRET", "") or secrets.token_hex(32)
+
+# In-memory token store: token_str → expiry_timestamp
+# Cleaned up lazily on each token creation.
+_ws_tokens: dict[str, float] = {}
+_ws_tokens_lock = asyncio.Lock()
+
+
+@app.post("/api/v1/ws-token", dependencies=[Depends(require_api_key)])
+async def create_ws_token():
+    """Exchange API key for a short-lived WebSocket auth token."""
+    nonce = secrets.token_hex(16)
+    ts = str(int(_time.time()))
+    token = hmac.new(
+        _WS_TOKEN_SECRET.encode(), (nonce + ts).encode(), hashlib.sha256
+    ).hexdigest()
+    expiry = _time.time() + WS_TOKEN_TTL
+
+    async with _ws_tokens_lock:
+        # Lazy cleanup of expired tokens
+        now = _time.time()
+        expired = [t for t, exp in _ws_tokens.items() if exp <= now]
+        for t in expired:
+            del _ws_tokens[t]
+        _ws_tokens[token] = expiry
+
+    return {"token": token, "expires_in": WS_TOKEN_TTL}
+
+
 # ─── WebSocket Live Feed ───────────────────────────────────────────────────────
 # SECURITY: Auth-after-connect protocol.
 # 1. Accept the connection (required by WebSocket spec to send close frames)
 # 2. Wait for {"type": "auth", "token": "..."} within AUTH_TIMEOUT seconds
-# 3. Block all other messages until authenticated
+# 3. Validate token is a valid short-lived WS token OR the API key (fallback)
 # 4. Close with 4003 if auth fails or times out
 WS_AUTH_TIMEOUT = 10  # seconds
 MAX_WS_CLIENTS = 100
+
+
+async def _validate_ws_token(token: str) -> bool:
+    """Check if token is a valid short-lived WS token (one-time use)."""
+    async with _ws_tokens_lock:
+        expiry = _ws_tokens.get(token)
+        if expiry is not None and _time.time() < expiry:
+            del _ws_tokens[token]  # One-time use
+            return True
+    return False
 
 
 @app.websocket("/ws/live")
@@ -255,7 +341,10 @@ async def ws_live_feed(ws: WebSocket):
             # Wait for auth message within timeout
             raw = await asyncio.wait_for(ws.receive_text(), timeout=WS_AUTH_TIMEOUT)
             msg = json.loads(raw)
-            if msg.get("type") != "auth" or msg.get("token") != _expected:
+            token = msg.get("token", "")
+            # Accept short-lived WS token (preferred) or API key (fallback)
+            is_valid = await _validate_ws_token(token) if token else False
+            if msg.get("type") != "auth" or (not is_valid and token != _expected):
                 log.warning("🔒 WebSocket rejected — invalid auth")
                 await ws.close(code=4003)
                 return

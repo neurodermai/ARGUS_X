@@ -198,11 +198,17 @@ class SupabaseClient:
     # ── Red Team Sessions ─────────────────────────────────────────────────────
 
     async def log_red_team_result(self, result: dict):
-        """Log a red team attack result."""
+        """Log a red team attack result.
+        SECURITY: attack_text is hashed before storage — raw payloads are
+        never persisted to prevent attack intelligence leakage."""
         try:
             if self.available:
+                # Hash attack text — align with events table redaction policy
+                raw_text = result.get("attack", "")[:500]
+                import hashlib
+                text_hash = hashlib.sha256(raw_text.encode()).hexdigest()[:32] if raw_text else ""
                 row = {
-                    "attack_text":  result.get("attack", "")[:500],
+                    "attack_text":  text_hash + " [HASHED]",
                     "attack_type":  result.get("attack_type"),
                     "tier":         result.get("tier", 1),
                     "bypassed":     result.get("bypassed", False),

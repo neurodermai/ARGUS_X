@@ -1,14 +1,17 @@
 # ARGUS-X Backend — Production Deployment Dependencies (pinned)
 # Includes ONNX ML inference (no PyTorch) — enables ML classifier in production
 # Excludes sentence-transformers (pulls PyTorch ~1.5GB) — those features have fallbacks
+#
+# IMPORTANT: All shared dependencies MUST use identical versions as requirements.txt
 
 fastapi==0.115.12
 uvicorn[standard]==0.34.3
 pydantic==2.11.3
 python-dotenv==1.1.0
 
-# Supabase (postgrest is pulled transitively by supabase)
+# Supabase (postgrest pinned explicitly for consistency with dev)
 supabase==2.15.2
+postgrest==0.19.4
 
 # LLM
 litellm==1.73.6

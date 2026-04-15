@@ -201,6 +201,8 @@ async def apex_attack_demo(request: Request):
         if not fw.get("blocked"):
             # Blue agent patches the gap
             app.state.firewall.add_dynamic_rule(atk["text"], atk["type"])
+            # Persist to DB so the rule survives restarts
+            await app.state.db.add_dynamic_rule(atk["text"], atk["type"], source="APEX_DEMO_PATCH")
             variants_blocked = await app.state.mutator.preblock_variants(
                 atk["text"], atk["type"], app.state.firewall
             )

@@ -1,7 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════
 // ARGUS-X — API Key Manager
-// SECURITY: API key is stored in sessionStorage (cleared when tab closes)
-// and cached in a module-level variable for fast access.
+//
+// SECURITY RISK: API key is stored in sessionStorage which is accessible
+// to any JavaScript running on the same origin. If an XSS vulnerability
+// exists, an attacker could exfiltrate this key.
+//
+// IDEAL: Move to HttpOnly cookie-based auth (server sets cookie via
+// Set-Cookie header, JS never touches the token). This requires backend
+// changes to support cookie-based session auth.
+//
+// CURRENT MITIGATIONS:
+//   1. sessionStorage (not localStorage) — cleared when tab closes
+//   2. CSP headers block inline scripts and untrusted script sources
+//   3. All LLM output is HTML-escaped before rendering (chat.py)
+//   4. In-memory cache reduces storage reads
+//
 // Never use localStorage for credentials — it persists across sessions.
 // ═══════════════════════════════════════════════════════════════════════
 
