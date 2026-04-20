@@ -105,7 +105,7 @@ class InputFirewall:
     """
     Two-stage input firewall:
     Stage 1: Regex Rule Engine — 30+ patterns, 0-1ms latency
-    Stage 2: ONNX ML Classifier — DistilBERT, 15-30ms latency
+    Stage 2: ONNX ML Classifier — DeBERTa-v3, 15-30ms latency
     
     Gracefully degrades to rule-only mode if ML model unavailable.
     """

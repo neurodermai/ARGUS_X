@@ -114,11 +114,17 @@ async def redteam_test(
 
 
 @router.get("/redteam/bypass-history")
-async def get_bypass_history(request: Request, limit: int = 10):
+async def get_bypass_history(
+    request: Request,
+    limit: int = 10,
+    x_redteam_token: Optional[str] = Header(None),
+):
     """
     Get recent auto-patched bypasses — shows system learning over time.
     Returns last N bypasses with: payload, type, tier, timestamp, and patch result.
     """
+    if _REDTEAM_TOKEN and x_redteam_token != _REDTEAM_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-RedTeam-Token")
     app = request.app
     db_results = await app.state.db.get_bypass_history(min(max(limit, 1), 50))
 
@@ -171,7 +177,10 @@ _APEX_ATTACKS = [
 
 @router.post("/redteam/apex-demo")
 @_rate_limit("3/minute")
-async def apex_attack_demo(request: Request):
+async def apex_attack_demo(
+    request: Request,
+    x_redteam_token: Optional[str] = Header(None),
+):
     """
     Apex Attack Demo — One-button showcase of detect → patch → re-block.
 
@@ -182,6 +191,8 @@ async def apex_attack_demo(request: Request):
 
     Returns full timeline for the frontend to animate.
     """
+    if _REDTEAM_TOKEN and x_redteam_token != _REDTEAM_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-RedTeam-Token")
     app = request.app
     timeline = []
 
