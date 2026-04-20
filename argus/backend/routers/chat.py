@@ -7,13 +7,17 @@ import os
 import re
 import time
 import uuid
+import asyncio
 import hashlib
 import html
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal
+
+log = logging.getLogger("argus.chat")
 
 
 # Rate limiting (graceful — no-op if slowapi not installed)
@@ -34,15 +38,21 @@ def _rate_limit(limit_string: str):
 router = APIRouter()
 
 # Server-side only: demo bypass. NEVER expose this via the public API.
-# Operator must explicitly set DEMO_BYPASS_ENABLED=true in environment.
-# SECURITY: Force-disabled when ENV=production regardless of flag.
+# SECURITY: Triple-gated — requires ENV != production + flag + dedicated token.
 _ENV = os.getenv("ENV", "development").lower()
 _demo_raw = os.getenv("DEMO_BYPASS_ENABLED", "false").lower() == "true"
 DEMO_BYPASS_ENABLED = _demo_raw and _ENV != "production"
+DEMO_BYPASS_TOKEN = os.getenv("DEMO_BYPASS_TOKEN", "")
 if _demo_raw and _ENV == "production":
     import logging
     logging.getLogger("argus.security").critical(
         "🚨 DEMO_BYPASS_ENABLED=true IGNORED — blocked in production mode"
+    )
+if DEMO_BYPASS_ENABLED and not DEMO_BYPASS_TOKEN:
+    import logging
+    logging.getLogger("argus.security").warning(
+        "⚠️ DEMO_BYPASS_ENABLED=true but DEMO_BYPASS_TOKEN not set — "
+        "bypass will be disabled until token is configured"
     )
 
 
@@ -150,13 +160,21 @@ async def chat(req: ChatRequest, request: Request):
     app = request.app
     sid = req.session_id or str(uuid.uuid4())[:8]
 
-    # ── DEMO BYPASS MODE (server-side only, operator-controlled) ─────────
-    # This mode is ONLY active when the operator sets DEMO_BYPASS_ENABLED=true
-    # in the server environment. It is NEVER controllable by client input.
-    if DEMO_BYPASS_ENABLED:
+    # ── DEMO BYPASS MODE (triple-gated: flag + non-prod ENV + token) ─────
+    # Requires ALL of:
+    #   1. DEMO_BYPASS_ENABLED=true in env
+    #   2. ENV != production
+    #   3. DEMO_BYPASS_TOKEN set (non-empty) in env
+    #   4. Client sends matching X-Demo-Token header
+    _demo_active = False
+    if DEMO_BYPASS_ENABLED and DEMO_BYPASS_TOKEN:
+        _provided_demo_token = request.headers.get("x-demo-token", "")
+        if _provided_demo_token == DEMO_BYPASS_TOKEN:
+            _demo_active = True
+    if _demo_active:
         import logging
         logging.getLogger("argus.security").warning(
-            "DEMO_BYPASS active — security pipeline skipped for message from "
+            "DEMO_BYPASS activated via token — security pipeline skipped for "
             f"user={req.user_id} session={sid}"
         )
         raw = await app.state.llm.generate(req.message)
@@ -186,28 +204,52 @@ async def chat(req: ChatRequest, request: Request):
 
     if fw["blocked"]:
         # ── LAYER 3: ATTACK FINGERPRINTING ───────────────────────────────
-        fp = await app.state.fingerprinter.fingerprint(req.message, fw["threat_type"])
+        try:
+            fp = await app.state.fingerprinter.fingerprint(req.message, fw["threat_type"])
+        except Exception as e:
+            log.error(f"Fingerprinter failed: {e}")
+            fp = {"sophistication_score": 0, "fingerprint_id": "ERR", "explanation": ""}
         sophistication = fp.get("sophistication_score", 1)
         fingerprint = fp.get("fingerprint_id")
 
-        # ── LAYER 4: SEMANTIC MUTATION ENGINE ────────────────────────────
-        mutations = await app.state.mutator.preblock_variants(
-            req.message, fw["threat_type"], app.state.firewall
-        )
+        # ── LAYER 4: SEMANTIC MUTATION ENGINE (non-blocking via queue) ────
+        # Mutations don't affect the response — they enrich future detection.
+        # Routed through bounded task queue for backpressure under load.
+        mutations = 0
+        try:
+            _msg, _tt, _fw_ref = req.message, fw["threat_type"], app.state.firewall
+            app.state.task_queue.enqueue(
+                lambda: app.state.mutator.preblock_variants(_msg, _tt, _fw_ref),
+                f"mutation:{_tt}"
+            )
+        except Exception as e:
+            log.error(f"MutationEngine enqueue failed: {e}")
 
         # ── LAYER 7: XAI ENGINE ─────────────────────────────────────────
-        xai = await app.state.xai.explain(
-            req.message, fw, fingerprint_result=fp, session_level=session_level
-        )
+        try:
+            xai = await app.state.xai.explain(
+                req.message, fw, fingerprint_result=fp, session_level=session_level
+            )
+        except Exception as e:
+            log.error(f"XAI explain failed: {e}")
+            xai = {"primary_reason": "XAI unavailable", "pattern_family": "",
+                   "evolution_note": "", "recommended_action": "",
+                   "layer_decisions": [], "confidence_breakdown": {}}
         explanation = xai.get("primary_reason", fp.get("explanation", ""))
 
         # ── LAYER 6: EVOLUTION TRACKER ───────────────────────────────────
-        app.state.evolution.record(sophistication, fw["threat_type"])
-        if app.state.evolution.should_tighten_firewall():
-            app.state.firewall.tighten_threshold()
+        try:
+            app.state.evolution.record(sophistication, fw["threat_type"])
+            if app.state.evolution.should_tighten_firewall():
+                app.state.firewall.tighten_threshold()
+        except Exception as e:
+            log.error(f"EvolutionTracker failed: {e}")
 
         # ── LAYER 6: THREAT CLUSTERER ────────────────────────────────────
-        await app.state.clusterer.ingest(req.message, fw["threat_type"], sophistication)
+        try:
+            await app.state.clusterer.ingest(req.message, fw["threat_type"], sophistication)
+        except Exception as e:
+            log.error(f"ThreatClusterer ingest failed: {e}")
 
         # ── LAYER 3: THREAT CORRELATOR (ingest for campaign detection) ───
         elapsed = (time.perf_counter() - t0) * 1000
@@ -219,25 +261,28 @@ async def chat(req: ChatRequest, request: Request):
         )
 
         # ── LAYER 1: DATABASE + REALTIME ─────────────────────────────────
-        await app.state.db.log_event(ev)
-        await app.state.db.increment_stat("blocked")
-        await app.state.db.upsert_fingerprint(
-            fingerprint, fw["threat_type"], sophistication, explanation
-        )
-        await app.state.db.log_xai_decision({
-            "attack_preview": ev["preview"],
-            "verdict": "BLOCKED",
-            "sophistication_score": sophistication,
-            "primary_reason": xai.get("primary_reason", ""),
-            "pattern_family": xai.get("pattern_family", ""),
-            "evolution_note": xai.get("evolution_note", ""),
-            "recommended_action": xai.get("recommended_action", ""),
-            "layer_decisions": xai.get("layer_decisions", []),
-            "confidence_breakdown": xai.get("confidence_breakdown", {}),
-        })
-        await app.state.broadcast(app, "attack", ev)
-        await _update_session(app, sid, req.user_id, "BLOCKED", fw["score"])
-        app.state.correlator.ingest_event(ev)
+        try:
+            await app.state.db.log_event(ev)
+            await app.state.db.increment_stat("blocked")
+            await app.state.db.upsert_fingerprint(
+                fingerprint, fw["threat_type"], sophistication, explanation
+            )
+            await app.state.db.log_xai_decision({
+                "attack_preview": ev["preview"],
+                "verdict": "BLOCKED",
+                "sophistication_score": sophistication,
+                "primary_reason": xai.get("primary_reason", ""),
+                "pattern_family": xai.get("pattern_family", ""),
+                "evolution_note": xai.get("evolution_note", ""),
+                "recommended_action": xai.get("recommended_action", ""),
+                "layer_decisions": xai.get("layer_decisions", []),
+                "confidence_breakdown": xai.get("confidence_breakdown", {}),
+            })
+            await app.state.broadcast(app, "attack", ev)
+            await _update_session(app, sid, req.user_id, "BLOCKED", fw["score"])
+            app.state.correlator.ingest_event(ev)
+        except Exception as e:
+            log.error(f"Blocked-path observation writes failed: {e}")
 
         return ChatResponse(
             response="⛔ Request blocked by ARGUS-X Input Firewall.",
@@ -250,18 +295,32 @@ async def chat(req: ChatRequest, request: Request):
         )
 
     # ── LAYER 2: LLM CORE ───────────────────────────────────────────────
-    llm_response = await app.state.llm.generate(req.message, context=ctx_dicts)
+    try:
+        llm_response = await app.state.llm.generate(req.message, context=ctx_dicts)
+    except Exception as e:
+        log.error(f"LLM generation failed: {e}")
+        llm_response = "I'm sorry, I'm unable to process your request right now."
 
     # ── LAYER 3: OUTPUT AUDITOR ──────────────────────────────────────────
-    audit = await app.state.auditor.analyze(llm_response, req.message)
+    try:
+        audit = await app.state.auditor.analyze(llm_response, req.message)
+    except Exception as e:
+        log.error(f"Output auditor failed: {e}")
+        audit = {"flagged": False, "confidence": 0}
 
     elapsed = (time.perf_counter() - t0) * 1000
 
     if audit["flagged"]:
         # ── XAI for sanitized events ─────────────────────────────────────
-        xai = await app.state.xai.explain(
-            req.message, fw, audit_result=audit, session_level=session_level
-        )
+        try:
+            xai = await app.state.xai.explain(
+                req.message, fw, audit_result=audit, session_level=session_level
+            )
+        except Exception as e:
+            log.error(f"XAI explain failed (sanitized): {e}")
+            xai = {"primary_reason": "XAI unavailable", "pattern_family": "",
+                   "evolution_note": "", "recommended_action": "",
+                   "layer_decisions": [], "confidence_breakdown": {}}
 
         ev = _build_event(
             req.user_id, sid, req.message, "SANITIZED",
@@ -269,22 +328,25 @@ async def chat(req: ChatRequest, request: Request):
             elapsed, "OUTPUT_AUDITOR", explanation=xai.get("primary_reason", audit.get("explanation")),
             session_threat_level=session_level
         )
-        await app.state.db.log_event(ev)
-        await app.state.db.increment_stat("sanitized")
-        await app.state.db.log_xai_decision({
-            "attack_preview": ev["preview"],
-            "verdict": "SANITIZED",
-            "sophistication_score": 0,
-            "primary_reason": xai.get("primary_reason", ""),
-            "pattern_family": xai.get("pattern_family", ""),
-            "evolution_note": "",
-            "recommended_action": xai.get("recommended_action", ""),
-            "layer_decisions": xai.get("layer_decisions", []),
-            "confidence_breakdown": xai.get("confidence_breakdown", {}),
-        })
-        await app.state.broadcast(app, "sanitized", ev)
-        await _update_session(app, sid, req.user_id, "SANITIZED", audit["confidence"])
-        app.state.correlator.ingest_event(ev)
+        try:
+            await app.state.db.log_event(ev)
+            await app.state.db.increment_stat("sanitized")
+            await app.state.db.log_xai_decision({
+                "attack_preview": ev["preview"],
+                "verdict": "SANITIZED",
+                "sophistication_score": 0,
+                "primary_reason": xai.get("primary_reason", ""),
+                "pattern_family": xai.get("pattern_family", ""),
+                "evolution_note": "",
+                "recommended_action": xai.get("recommended_action", ""),
+                "layer_decisions": xai.get("layer_decisions", []),
+                "confidence_breakdown": xai.get("confidence_breakdown", {}),
+            })
+            await app.state.broadcast(app, "sanitized", ev)
+            await _update_session(app, sid, req.user_id, "SANITIZED", audit["confidence"])
+            app.state.correlator.ingest_event(ev)
+        except Exception as e:
+            log.error(f"Sanitized-path observation writes failed: {e}")
 
         return ChatResponse(
             response=_sanitize_response(audit["sanitized_response"]), blocked=False, sanitized=True,
@@ -301,9 +363,12 @@ async def chat(req: ChatRequest, request: Request):
         None, fw["score"], "NONE", elapsed, fw.get("method", ""),
         session_threat_level=session_level
     )
-    await app.state.db.log_event(ev)
-    await app.state.db.increment_stat("clean")
-    await app.state.broadcast(app, "clean", ev)
+    try:
+        await app.state.db.log_event(ev)
+        await app.state.db.increment_stat("clean")
+        await app.state.broadcast(app, "clean", ev)
+    except Exception as e:
+        log.error(f"Clean-path observation writes failed: {e}")
 
     return ChatResponse(
         response=_sanitize_response(llm_response), blocked=False, sanitized=False,

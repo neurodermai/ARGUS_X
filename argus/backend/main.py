@@ -133,6 +133,10 @@ async def lifespan(app: FastAPI):
     app.state.clusterer = container.clusterer
     app.state.xai = container.xai
     app.state.session_store = container.session_store
+    app.state.task_queue = container.task_queue
+
+    # Start bounded background task queue
+    await container.task_queue.start()
 
     # WebSocket clients — set + lock for safe concurrent access
     app.state.ws_clients: set[WebSocket] = set()
@@ -232,6 +236,14 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", _default_frontend)
 # Guard: reject wildcard — it must never reach production.
 if FRONTEND_URL.strip() == "*":
     raise RuntimeError("FATAL: FRONTEND_URL must not be '*'. Set a specific origin.")
+
+# SECURITY: Warn if production is relying on auto-detected FRONTEND_URL.
+_env_mode = os.getenv("ENV", "development").lower()
+if _env_mode == "production" and not os.getenv("FRONTEND_URL"):
+    log.critical(
+        "🚨 FRONTEND_URL not explicitly set in production — auto-detected '%s' from "
+        "RAILWAY_PUBLIC_DOMAIN. Set FRONTEND_URL explicitly for security.", FRONTEND_URL
+    )
 
 ALLOWED_ORIGINS = [FRONTEND_URL]
 # Also allow the Railway domain if it differs from FRONTEND_URL
@@ -496,6 +508,7 @@ async def health(request: Request):
             "correlator": app.state.correlator.status(),
         }
         response["ws_connections"] = len(app.state.ws_clients)
+        response["task_queue"] = app.state.task_queue.status()
 
     return response
 
